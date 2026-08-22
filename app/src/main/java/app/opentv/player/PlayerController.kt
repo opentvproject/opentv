@@ -18,6 +18,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -104,6 +105,8 @@ class PlayerController(
         /** Live streams are never resumed; VOD is. */
         val startPositionMillis: Long = 0L,
         val isLive: Boolean = true,
+        /** Stable database identity used only to remember this channel's learned live target. */
+        val channelId: Long? = null,
     )
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -116,6 +119,21 @@ class PlayerController(
     private var switchJob: Job? = null
     private var current: Request? = null
     private var consecutiveFailures = 0
+    private var currentLiveTargetMillis = AdaptiveLivePolicy.DEFAULT_TARGET_MILLIS
+    private var currentReachedReady = false
+
+    private val liveTargetPreferences = context.getSharedPreferences(
+        LIVE_TARGET_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
+
+    /**
+     * Media3 already moves its target after a rebuffer. Five seconds reacts quickly enough for
+     * IPTV segment-publication gaps; the stock 500 ms step can require many visible stalls.
+     */
+    private val livePlaybackSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
+        .setTargetLiveOffsetIncrementOnRebufferMs(AdaptiveLivePolicy.REBUFFER_STEP_MILLIS)
+        .build()
 
     /**
      * Held so the User-Agent can be swapped per source before each tune.
@@ -187,6 +205,7 @@ class PlayerController(
                 .setLoadErrorHandlingPolicy(loadErrorPolicy),
         )
         .setTrackSelector(trackSelector)
+        .setLivePlaybackSpeedControl(livePlaybackSpeedControl)
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
@@ -221,10 +240,28 @@ class PlayerController(
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     val title = current?.title.orEmpty()
+                    if (
+                        playbackState == Player.STATE_BUFFERING &&
+                        currentReachedReady &&
+                        !preview &&
+                        !dvr &&
+                        current?.let(::usesAdaptiveHlsPolicy) == true
+                    ) {
+                        val learnedTarget = AdaptiveLivePolicy.targetAfterRebuffer(currentLiveTargetMillis)
+                        if (learnedTarget != currentLiveTargetMillis) {
+                            currentLiveTargetMillis = learnedTarget
+                            current?.channelId?.let { channelId ->
+                                liveTargetPreferences.edit()
+                                    .putLong(liveTargetKey(channelId), learnedTarget)
+                                    .apply()
+                            }
+                        }
+                    }
                     _state.value = when (playbackState) {
                         Player.STATE_BUFFERING -> State.Buffering(title)
                         Player.STATE_READY -> {
                             consecutiveFailures = 0
+                            currentReachedReady = true
                             State.Playing(title)
                         }
                         Player.STATE_IDLE -> _state.value
@@ -269,17 +306,24 @@ class PlayerController(
             if (debounce) delay(switchDebounceMillis)
 
             consecutiveFailures = 0
+            currentReachedReady = false
             httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
             _state.value = State.Buffering(request.title)
+
+            val adaptiveHls = usesAdaptiveHlsPolicy(request)
+            val savedLiveTarget = request.channelId?.takeIf { adaptiveHls }?.let { channelId ->
+                val key = liveTargetKey(channelId)
+                if (liveTargetPreferences.contains(key)) liveTargetPreferences.getLong(key, 0L) else null
+            }
+            currentLiveTargetMillis = AdaptiveLivePolicy.targetFor(savedLiveTarget)
 
             val mediaItem = MediaItem.Builder()
                 .setUri(request.url)
                 .apply {
-                    // Only meaningful for live streams; setting it on VOD skews seeking.
-                    if (request.isLive) {
+                    if (adaptiveHls) {
                         setLiveConfiguration(
                             MediaItem.LiveConfiguration.Builder()
-                                .setTargetOffsetMs(LIVE_TARGET_OFFSET_MILLIS)
+                                .setTargetOffsetMs(currentLiveTargetMillis)
                                 .build(),
                         )
                     }
@@ -385,6 +429,7 @@ class PlayerController(
         const val MAX_LOAD_RETRIES = 5
         const val MAX_AUTO_RESTARTS = 3
         const val AUTO_RESTART_DELAY_MILLIS = 1_500L
+        const val LIVE_TARGET_PREFERENCES = "adaptive_live_targets_v1"
 
         /**
          * Larger than ExoPlayer's defaults. IPTV sources are much twitchier than a CDN, and a
@@ -421,6 +466,10 @@ class PlayerController(
         const val PREVIEW_BUFFER_AFTER_REBUFFER_MILLIS = 1_500
         const val PREVIEW_SWITCH_DEBOUNCE_MILLIS = 700L
 
-        const val LIVE_TARGET_OFFSET_MILLIS = 10_000L
     }
+
+    private fun liveTargetKey(channelId: Long): String = "channel_$channelId"
+
+    private fun usesAdaptiveHlsPolicy(request: Request): Boolean =
+        AdaptiveLivePolicy.appliesTo(request.isLive, request.url)
 }
