@@ -184,8 +184,12 @@
     <string name="settings_channel_layout_title">Channel layout</string>
     <string name="settings_channel_layout_grid">Guide grid (with timeline)</string>
     <string name="settings_channel_layout_list">Simple list</string>
+    <string name="settings_preview_channel_title" translatable="false">Guide preview channel</string>
+    <string name="settings_preview_channel_current" translatable="false">Keep playing the current channel</string>
+    <string name="settings_preview_channel_highlighted" translatable="false">Follow the highlighted channel</string>
+    <string name="settings_preview_channel_note" translatable="false">Choose whether browsing leaves the channel you were watching in the preview pane or retunes the preview as you move through the guide.</string>
     <string name="settings_live_preview_title">Live preview in the guide</string>
-    <string name="settings_live_preview_subtitle">Play the selected channel in the preview pane. Turn this off if the guide stutters on an older box.</string>
+    <string name="settings_live_preview_subtitle">Play live TV in the preview pane. Turn this off if the guide stutters on an older box.</string>
     <string name="settings_preview_sound_title">Preview sound</string>
     <string name="settings_preview_sound_subtitle">Play the preview channel\'s audio too, not just the picture.</string>
     <string name="settings_section_playback">Playback</string>
