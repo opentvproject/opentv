@@ -60,6 +60,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val settings = remember { AppSettings.get(context) }
     val themeMode by settings.themeMode.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
+    val previewMode by settings.guidePreviewMode.collectAsState()
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
@@ -175,6 +176,24 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_channel_layout_list),
                 channelLayout == AppSettings.ChannelLayout.LIST,
             ) { settings.setChannelLayout(AppSettings.ChannelLayout.LIST) }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.settings_preview_channel_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            ThemeOption(
+                stringResource(R.string.settings_preview_channel_current),
+                previewMode == AppSettings.GuidePreviewMode.CURRENT_CHANNEL,
+            ) { settings.setGuidePreviewMode(AppSettings.GuidePreviewMode.CURRENT_CHANNEL) }
+            ThemeOption(
+                stringResource(R.string.settings_preview_channel_highlighted),
+                previewMode == AppSettings.GuidePreviewMode.HIGHLIGHTED_CHANNEL,
+            ) { settings.setGuidePreviewMode(AppSettings.GuidePreviewMode.HIGHLIGHTED_CHANNEL) }
+            Text(
+                stringResource(R.string.settings_preview_channel_note),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(8.dp))
             ToggleRow(
                 title = stringResource(R.string.settings_live_preview_title),

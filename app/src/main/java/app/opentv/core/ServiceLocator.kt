@@ -16,6 +16,7 @@ import app.opentv.data.repo.RecordingRepository
 import app.opentv.data.repo.ReminderRepository
 import app.opentv.data.repo.SourceRepository
 import app.opentv.recording.RecordingEngine
+import app.opentv.player.LivePlaybackSession
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 
@@ -72,6 +73,11 @@ object ServiceLocator {
                 .followSslRedirects(true)
                 .retryOnConnectionFailure(true)
                 .build()
+        }
+
+        /** One live player shared by the guide preview and the full-screen live destination. */
+        val livePlaybackSession: LivePlaybackSession by lazy {
+            LivePlaybackSession(appContext, streamingHttpClient, settings)
         }
 
         val xtreamApi: XtreamApi by lazy { XtreamApi(httpClient) }
