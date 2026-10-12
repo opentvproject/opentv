@@ -32,6 +32,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import app.opentv.core.ServiceLocator
+import app.opentv.player.ExternalPlayer
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +82,9 @@ fun SearchScreen(
     vodViewModel: VodViewModel = viewModel(),
 ) {
     var query by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val externalDefault by remember { ServiceLocator.get(context).settings.externalPlayerDefault }.collectAsState()
     val channelResults by viewModel.searchResults.collectAsState()
     val movieResults by vodViewModel.movieResults.collectAsState()
     val seriesResults by vodViewModel.seriesResults.collectAsState()
@@ -127,7 +135,11 @@ fun SearchScreen(
                         if (channelResults.isNotEmpty()) {
                             item { SectionHeader(stringResource(R.string.common_channels)) }
                             items(channelResults, key = { "c${it.key}" }) { row ->
-                                SearchResultRow(row = row, onClick = { onPlayChannel(row.primary) })
+                                SearchResultRow(row = row, onClick = {
+                                    // The "external player" setting applies here too.
+                                    if (externalDefault) scope.launch { ExternalPlayer.play(context, row.primary, chooser = false) }
+                                    else onPlayChannel(row.primary)
+                                })
                             }
                         }
                         if (movieResults.isNotEmpty()) {
@@ -227,7 +239,7 @@ private fun SearchResultRow(row: ChannelsViewModel.Row, onClick: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                row.primary.shownName,
+                row.shownName,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

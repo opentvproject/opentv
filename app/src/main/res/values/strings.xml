@@ -49,6 +49,11 @@
     <string name="guide_open_external">Open in external player</string>
     <string name="guide_play_channel_with">Play channel with</string>
     <string name="guide_no_external_player">No external player installed</string>
+    <string name="guide_watch_in_app">Watch in OpenTV</string>
+    <string name="guide_add_favourite">Add to favourites</string>
+    <string name="guide_remove_favourite">Remove from favourites</string>
+    <string name="guide_favourite_added">Added “%1$s” to favourites</string>
+    <string name="guide_favourite_removed">Removed “%1$s” from favourites</string>
     <string name="guide_record_now_playing">●  Record what\'s on now</string>
     <string name="guide_later_header">Later — record or remind</string>
     <string name="guide_no_info">No guide information</string>
@@ -181,6 +186,10 @@
     <string name="settings_language_spanish">Español</string>
     <string name="settings_language_note">Sets the app\'s language. The screen reloads when you change it.</string>
     <string name="settings_section_guide">Guide</string>
+    <string name="settings_playlist_mode_title">Channel display mode</string>
+    <string name="settings_playlist_mode_original">Original playlist (keep channels, names &amp; categories as is)</string>
+    <string name="settings_playlist_mode_merged">Merged &amp; cleaned (merge quality variants, clean names)</string>
+    <string name="settings_playlist_mode_subtitle">Choose whether to keep all channels and categories exactly as ordered in your playlist, or merge quality variants (HD/SD/FHD) into single channels with cleaned names.</string>
     <string name="settings_channel_layout_title">Channel layout</string>
     <string name="settings_channel_layout_grid">Guide grid (with timeline)</string>
     <string name="settings_channel_layout_list">Simple list</string>
@@ -192,7 +201,11 @@
     <string name="settings_subtitles_title">Show subtitles when available</string>
     <string name="settings_subtitles_subtitle">The default for new channels. While watching, the Subtitles button on the player lets you pick a specific track or turn them off.</string>
     <string name="settings_resume_title">Resume last channel on startup</string>
+    <string name="settings_external_player_title">Play channels in an external player</string>
+    <string name="settings_external_player_subtitle">Selecting a live channel opens it in your default video app (VLC, MX Player…) instead of the built-in player. Long-press a channel for “Watch in OpenTV”.</string>
     <string name="settings_resume_subtitle">Open the app straight into the channel you were last watching, instead of the guide. Press Back to reach the guide.</string>
+    <string name="settings_invert_channel_keys_title">Invert channel change buttons</string>
+    <string name="settings_invert_channel_keys_subtitle">Swap CH+ and CH- button directions on the TV remote.</string>
     <string name="settings_sleep_timer">Sleep timer</string>
     <string name="settings_sleep_off_desc">Off — playback keeps going until you stop it.</string>
     <string name="settings_sleep_on_desc">On — playback will stop in about %1$d min.</string>
@@ -409,6 +422,10 @@
     <string name="channels_hidden">Hidden</string>
     <string name="channels_showing">Showing</string>
     <string name="channels_show">Show</string>
+    <string name="channels_category_in_guide">Show this category in Live TV</string>
+    <string name="channels_category_off_hint">Switched off — this category and its channels aren\'t loaded in Live TV, search or favourites.</string>
+    <string name="channels_category_off_suffix">%1$s (off)</string>
+    <string name="guide_category_hidden_toast">“%1$s” hidden. Turn it back on in Channel manager.</string>
 
     <!-- ============================ Search ============================ -->
     <string name="search_type_name">Type a name</string>

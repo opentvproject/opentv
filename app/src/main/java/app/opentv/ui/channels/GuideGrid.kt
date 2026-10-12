@@ -3,12 +3,15 @@
  * Copyright (C) 2026 The OpenTV Contributors
  * Licensed under the GNU General Public License v3.0 or later.
  */
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package app.opentv.ui.channels
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,14 +26,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -84,11 +89,15 @@ fun GuideGrid(
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
     onProgramme: (ChannelsViewModel.Row, Programme) -> Unit = { _, _ -> },
-    onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
+    /** Long-press / hold OK on the channel cell — opens the channel menu. */
+    onLongPressRow: (ChannelsViewModel.Row) -> Unit = {},
     // Returns true if it handled the key (rail was hidden, so consume it); false to let normal
     // left-navigation carry focus into the already-visible rail.
     onExitLeftFromChannel: () -> Boolean = { false },
     dayOffset: Int = 0,
+    listState: LazyListState = rememberLazyListState(),
+    /** Attached to the [selectedKey] row's channel cell, so the host can put d-pad focus on it. */
+    focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
@@ -103,10 +112,11 @@ fun GuideGrid(
         TimeHeader(windowStartMillis, scroll)
 
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            items(rows, key = { it.key }) { row ->
+            items(rows, key = { it.key }, contentType = { "guide-row" }) { row ->
                 GuideRow(
                     row = row,
                     windowStartMillis = windowStartMillis,
@@ -116,8 +126,9 @@ fun GuideGrid(
                     onSelect = { onSelectRow(row) },
                     onFocus = { onFocusRow(row) },
                     onProgramme = { programme -> onProgramme(row, programme) },
-                    onToggleFavourite = { onToggleFavourite(row) },
+                    onLongPress = { onLongPressRow(row) },
                     onExitLeft = onExitLeftFromChannel,
+                    focusRequester = focusRequester.takeIf { row.key == selectedKey },
                 )
             }
         }
@@ -137,25 +148,31 @@ fun ChannelList(
     selectedKey: Any?,
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
-    onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
+    /** Long-press / hold OK on a row — opens the channel menu. */
+    onLongPressRow: (ChannelsViewModel.Row) -> Unit = {},
     onExitLeftFromChannel: () -> Boolean = { false },
+    listState: LazyListState = rememberLazyListState(),
+    /** Attached to the [selectedKey] row, so the host can put d-pad focus on it. */
+    focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val now = System.currentTimeMillis()
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        items(rows, key = { it.key }) { row ->
+        items(rows, key = { it.key }, contentType = { "channel-row" }) { row ->
             ChannelListRow(
                 row = row,
                 nowMillis = now,
                 isSelected = row.key == selectedKey,
                 onSelect = { onSelectRow(row) },
                 onFocus = { onFocusRow(row) },
-                onToggleFavourite = { onToggleFavourite(row) },
+                onLongPress = { onLongPressRow(row) },
                 onExitLeft = onExitLeftFromChannel,
+                focusRequester = focusRequester.takeIf { row.key == selectedKey },
             )
         }
     }
@@ -168,31 +185,31 @@ private fun ChannelListRow(
     isSelected: Boolean,
     onSelect: () -> Unit,
     onFocus: () -> Unit,
-    onToggleFavourite: () -> Unit,
+    onLongPress: () -> Unit,
     onExitLeft: () -> Boolean,
+    focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surface,
+                CELL_SHAPE,
             )
             .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CELL_SHAPE)
                 else Modifier,
             )
             // LEFT from a row reopens the collapsed rail, exactly like the grid's channel column.
-            .onPreviewKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft() else false
-            }
+            .onPreviewKeyEvent { e -> handleChannelKey(e, onExitLeft, onLongPress) }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocus()
             }
-            .clickable(onClick = onSelect)
+            .combinedClickable(onClick = onSelect, onLongClick = onLongPress)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -214,7 +231,7 @@ private fun ChannelListRow(
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    row.primary.shownName,
+                    row.shownName,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -268,16 +285,20 @@ private fun ChannelListRow(
                 )
             }
         }
-        IconButton(onClick = onToggleFavourite, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = if (row.primary.favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
-                contentDescription = if (row.primary.favourite) stringResource(R.string.common_remove_favourite)
-                else stringResource(R.string.common_favourite),
-                tint = if (row.primary.favourite) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        // Favouriting lives in the long-press menu now; the row only shows a small marker.
+        if (row.primary.favourite) FavouriteMarker()
     }
+}
+
+/** A small, non-focusable star on favourite channels — status only, not a button. */
+@Composable
+private fun FavouriteMarker() {
+    Icon(
+        imageVector = Icons.Filled.Star,
+        contentDescription = stringResource(R.string.common_favourite),
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 6.dp).size(16.dp),
+    )
 }
 
 @Composable
@@ -318,8 +339,9 @@ private fun GuideRow(
     onSelect: () -> Unit,
     onFocus: () -> Unit,
     onProgramme: (Programme) -> Unit,
-    onToggleFavourite: () -> Unit = {},
+    onLongPress: () -> Unit = {},
     onExitLeft: () -> Boolean = { false },
+    focusRequester: FocusRequester? = null,
 ) {
     // Focus (the d-pad border) just moves the highlight. Selection (the filled cell) is the
     // channel the preview is playing — it only changes when you press OK.
@@ -332,28 +354,28 @@ private fun GuideRow(
             Modifier
                 .width(CHANNEL_COLUMN)
                 .fillMaxSize()
-                .clip(RoundedCornerShape(8.dp))
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .background(
                     if (isSelected) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surface,
+                    CELL_SHAPE,
                 )
                 .then(
                     if (focused) Modifier.border(
-                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp),
+                        2.dp, MaterialTheme.colorScheme.primary, CELL_SHAPE,
                     ) else Modifier,
                 )
                 // LEFT from this leftmost column asks the host to reopen the collapsed category
                 // rail; onExitLeft consumes the key only when it handled it (rail was hidden), so
                 // moving left onto programme blocks and into an already-visible rail still works.
-                .onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft()
-                    else false
-                }
+                // The remote's Menu / Info key opens the channel menu too, for remotes (Fire TV)
+                // where holding OK is awkward.
+                .onPreviewKeyEvent { e -> handleChannelKey(e, onExitLeft, onLongPress) }
                 .onFocusChanged {
                     focused = it.isFocused
                     if (it.isFocused) onFocus()
                 }
-                .clickable(onClick = onSelect)
+                .combinedClickable(onClick = onSelect, onLongClick = onLongPress)
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -374,7 +396,7 @@ private fun GuideRow(
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    row.primary.shownName,
+                    row.shownName,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -388,21 +410,8 @@ private fun GuideRow(
                     )
                 }
             }
-            // Favourite toggle. Phone/tablet users had no visible way to favourite from the guide
-            // (only the Channel Manager) — this puts a tappable star on every row; it stays d-pad
-            // focusable so it works from a TV remote too.
-            IconButton(
-                onClick = onToggleFavourite,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    imageVector = if (row.primary.favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
-                    contentDescription = if (row.primary.favourite) stringResource(R.string.common_remove_favourite)
-                    else stringResource(R.string.common_favourite),
-                    tint = if (row.primary.favourite) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            // Favouriting lives in the long-press menu now; the cell only shows a small marker.
+            if (row.primary.favourite) FavouriteMarker()
         }
 
         Spacer(Modifier.width(3.dp))
@@ -418,8 +427,7 @@ private fun GuideRow(
                         .width(HALF_HOUR_WIDTH * HOURS_IN_WINDOW.toFloat() * 2)
                         .fillMaxSize()
                         .padding(end = 3.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)),
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f), BLOCK_SHAPE),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Text(
@@ -469,28 +477,30 @@ private fun GuideRow(
 @Composable
 private fun ProgrammeBlock(title: String, width: Dp, isNow: Boolean, progress: Float, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    // Performance on TV boxes: a guide screen holds hundreds of these, so no `clip()` (each one
+    // would get its own render layer) - the shape is drawn by background/border instead - and a
+    // single focus node via `clickable` (an extra `focusable()` doubled the focus tree).
     Box(
         Modifier
             .width(width)
             .fillMaxSize()
             .padding(end = 3.dp)
-            .clip(RoundedCornerShape(6.dp))
             .background(
                 when {
                     focused -> MaterialTheme.colorScheme.primary
                     isNow -> MaterialTheme.colorScheme.primaryContainer
                     else -> MaterialTheme.colorScheme.surfaceVariant
                 },
+                BLOCK_SHAPE,
             )
             .then(
                 if (focused || isNow) Modifier.border(
                     if (focused) 2.dp else 1.dp,
                     MaterialTheme.colorScheme.primary,
-                    RoundedCornerShape(6.dp),
+                    BLOCK_SHAPE,
                 ) else Modifier,
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(onClick = onClick),
     ) {
         Text(
@@ -510,11 +520,30 @@ private fun ProgrammeBlock(title: String, width: Dp, isNow: Boolean, progress: F
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
+                    // Inset so the bar sits inside the rounded corners without needing a clip.
+                    .padding(horizontal = 4.dp)
                     .fillMaxWidth(progress.coerceIn(0f, 1f))
                     .height(3.dp)
                     .background(MaterialTheme.colorScheme.primary),
             )
         }
+    }
+}
+
+/**
+ * Shared key handling for a channel cell/row: LEFT may reopen the category rail (consumed only
+ * when [onExitLeft] handled it); the remote's Menu or Info key opens the channel menu.
+ */
+private fun handleChannelKey(
+    e: androidx.compose.ui.input.key.KeyEvent,
+    onExitLeft: () -> Boolean,
+    onMenu: () -> Unit,
+): Boolean {
+    if (e.type != KeyEventType.KeyDown) return false
+    return when (e.key) {
+        Key.DirectionLeft -> onExitLeft()
+        Key.Menu, Key.Info -> { onMenu(); true }
+        else -> false
     }
 }
 
@@ -532,6 +561,8 @@ private val CHANNEL_COLUMN = 220.dp
 private val ROW_HEIGHT = 64.dp
 // Floor for a programme block so a nearly-finished or very short show still shows its name.
 private val MIN_BLOCK_WIDTH = 72.dp
+private val BLOCK_SHAPE = RoundedCornerShape(6.dp)
+private val CELL_SHAPE = RoundedCornerShape(8.dp)
 private val HALF_HOUR_WIDTH: Dp = (30 * MINUTE_DP).dp
 
 private val clockFormat = SimpleDateFormat("HH:mm", Locale.getDefault())

@@ -53,6 +53,11 @@ object ManagerPage {
           .cat .label { flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .cat .count { color:var(--muted); font-size:.85rem; font-variant-numeric:tabular-nums; }
           .cat .chev { color:var(--muted); }
+          .cat.off .label, .cat.off .count { opacity:.45; text-decoration:line-through; }
+          .cat .btn { width:36px; height:36px; font-size:16px; }
+          .cattoggle { display:flex; align-items:center; gap:10px; padding:10px 12px; margin:6px 0 12px;
+                       background:var(--surface); border:1px solid var(--line); border-radius:12px; cursor:pointer; }
+          .cattoggle .txt { flex:1; font-size:.9rem; color:var(--muted); }
           .row { display:flex; align-items:center; gap:11px; padding:10px 12px;
                  background:var(--surface); border:1px solid var(--line); border-radius:12px; }
           .row.hidden { opacity:.55; }
@@ -164,6 +169,7 @@ object ManagerPage {
               <div id="srcBar" class="chips" hidden></div>
               <input id="catSearch" class="search" type="text" placeholder="Filter categories…"
                      autocapitalize="off" autocorrect="off" spellcheck="false">
+              <p class="hint">Tap the eye on a category to switch it off — it won't load on the TV at all.</p>
               <div id="catList" class="list"></div>
               <div id="catEmpty" class="empty" hidden></div>
             </section>
@@ -171,6 +177,7 @@ object ManagerPage {
             <section id="chanView" hidden>
               <div id="back" class="back">&#8249;&nbsp;Categories</div>
               <h2 id="chanHead" class="chanhead"></h2>
+              <div id="catToggle" class="cattoggle"><span class="txt" id="catToggleTxt"></span><div class="btn eye" id="catToggleBtn"></div></div>
               <p class="hint" id="chanHint">Tap a name to rename. Star to favourite, eye to hide, arrows to reorder.</p>
               <div id="chanList" class="list"></div>
               <div id="chanEmpty" class="empty" hidden></div>
@@ -265,15 +272,47 @@ object ManagerPage {
             empty.hidden = true;
             cats.forEach(function(c){
               var row = document.createElement('div');
-              row.className = 'cat';
               var label = document.createElement('span'); label.className = 'label'; label.textContent = c.label;
               var count = document.createElement('span'); count.className = 'count'; count.textContent = c.count;
+              var eye = document.createElement('div');
               var chev = document.createElement('span'); chev.className = 'chev'; chev.innerHTML = '&#8250;';
-              row.appendChild(label); row.appendChild(count); row.appendChild(chev);
+              function paint(){
+                row.className = 'cat' + (c.hidden ? ' off' : '');
+                eye.className = 'btn eye' + (c.hidden ? '' : ' on');
+                eye.innerHTML = c.hidden ? '&#128584;' : '&#128065;';
+                eye.title = c.hidden ? 'Category off — tap to show on the TV' : 'Showing — tap to switch the whole category off';
+              }
+              paint();
+              eye.onclick = function(e){ e.stopPropagation(); setCategoryHidden(c, !c.hidden, paint); };
+              row.appendChild(label); row.appendChild(count); row.appendChild(eye); row.appendChild(chev);
               row.onclick = function(){ openCategory(c); };
               list.appendChild(row);
             });
           }
+
+          function setCategoryHidden(c, target, done){
+            post('/category', { sourceId: c.sourceId, id: c.id, hidden: target })
+              .then(function(){
+                c.hidden = target;
+                if (done) done();
+                setStatus(target ? 'Category switched off on the TV' : 'Category showing on the TV', 'ok');
+              })
+              .catch(function(){ setStatus(UNREACH, 'err'); });
+          }
+
+          function paintCatToggle(){
+            if (!currentCat) return;
+            var off = !!currentCat.hidden;
+            el('catToggleTxt').textContent = off
+              ? 'This whole category is switched off — not loaded on the TV.'
+              : 'Showing on the TV. Tap to switch the whole category off.';
+            var b = el('catToggleBtn');
+            b.className = 'btn eye' + (off ? '' : ' on');
+            b.innerHTML = off ? '&#128584;' : '&#128065;';
+          }
+          el('catToggle').onclick = function(){
+            if (currentCat) setCategoryHidden(currentCat, !currentCat.hidden, paintCatToggle);
+          };
           el('catSearch').addEventListener('input', renderCategories);
 
           // ---- Channels ----------------------------------------------------------------------
@@ -282,6 +321,7 @@ object ManagerPage {
             el('catView').hidden = true;
             el('chanView').hidden = false;
             el('chanHead').textContent = cat.label;
+            paintCatToggle();
             window.scrollTo(0, 0);
             var listEl = el('chanList'); listEl.innerHTML = '';
             var empty = el('chanEmpty'); empty.hidden = true;
@@ -297,6 +337,7 @@ object ManagerPage {
             el('chanView').hidden = true;
             el('catView').hidden = false;
             channels = [];
+            renderCategories();
           };
 
           function renderChannels(){

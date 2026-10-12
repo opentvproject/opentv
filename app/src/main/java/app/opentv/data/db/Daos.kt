@@ -382,6 +382,22 @@ interface ProgrammeDao {
     )
     fun observeWindow(fromUtcMillis: Long, toUtcMillis: Long): Flow<List<Programme>>
 
+    /**
+     * The guide window for a *bounded* set of guide channel ids — one category's worth. Callers
+     * must keep [channelIds] under SQLite's bound-variable cap (see [EpgRepository.observeWindowFor],
+     * which chunks); this is what lets a category tap read a few hundred programmes instead of the
+     * whole catalogue's window. Uses the `epgChannelId` index.
+     */
+    @Query(
+        """
+        SELECT * FROM programmes
+        WHERE epgChannelId IN (:channelIds)
+          AND endUtcMillis > :fromUtcMillis
+          AND startUtcMillis < :toUtcMillis
+        """
+    )
+    fun observeWindowFor(channelIds: List<String>, fromUtcMillis: Long, toUtcMillis: Long): Flow<List<Programme>>
+
     /** What is on right now, for the channel list's "now playing" line. */
     @Query(
         """

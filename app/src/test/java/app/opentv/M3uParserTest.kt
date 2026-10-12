@@ -71,15 +71,32 @@ class M3uParserTest {
     }
 
     @Test
-    fun `duplicate tvg-ids do not collide`() {
-        // Providers routinely list SD and HD variants under one tvg-id. The unique index on
-        // (sourceId, streamId) would otherwise abort the entire import.
+    fun `duplicate tvg-ids with distinct urls do not collide and are both preserved`() {
+        // Providers routinely list SD and HD variants under one tvg-id. Both are preserved
+        // with distinct stable stream IDs so quality variants or individual channels are kept.
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="dup",Channel SD
             http://example.com/sd.m3u8
             #EXTINF:-1 tvg-id="dup",Channel HD
             http://example.com/hd.m3u8
+        """.trimIndent()
+
+        val result = M3uParser.parse(playlist, sourceId = 1)
+
+        assertThat(result.channels).hasSize(2)
+        assertThat(result.channels.map { it.name }).containsExactly("Channel SD", "Channel HD")
+        assertThat(result.channels.map { it.epgChannelId }).containsExactly("dup", "dup")
+    }
+
+    @Test
+    fun `identical stream urls collapse duplicate entries`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="dup",Channel SD
+            http://example.com/sd.m3u8
+            #EXTINF:-1 tvg-id="dup",Channel SD Duplicate
+            http://example.com/sd.m3u8
         """.trimIndent()
 
         val result = M3uParser.parse(playlist, sourceId = 1)

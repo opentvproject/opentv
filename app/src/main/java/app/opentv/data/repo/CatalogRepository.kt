@@ -883,6 +883,7 @@ class CatalogRepository(
      * and a channel that is really single-quality gets no switch at all.
      */
     suspend fun variants(channel: Channel): List<Channel> {
+        if (settings.playlistMode.value == AppSettings.PlaylistMode.ORIGINAL) return listOf(channel)
         if (channel.groupKey.isEmpty()) return listOf(channel)
         val all = channelDao.variantsInGroup(channel.groupKey)
         return distinctByQuality(all).ifEmpty { listOf(channel) }

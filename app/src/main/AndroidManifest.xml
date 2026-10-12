@@ -57,10 +57,17 @@
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenTV"
         android:usesCleartextTraffic="true"
         tools:targetApi="34">
+
+        <!--
+          largeHeap: TV boxes often ship 1-2 GB of RAM with a small default app heap, and a big
+          provider's channel list plus the live preview player can run out of it. Asking for the
+          large heap avoids out-of-memory crashes there; phones with plenty of RAM are unaffected.
+        -->
 
         <!--
           usesCleartextTraffic is on because the overwhelming majority of IPTV panels are

@@ -25,6 +25,8 @@ import java.util.zip.GZIPInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -79,6 +81,28 @@ class EpgRepository(
 
     fun observeWindow(fromUtcMillis: Long, toUtcMillis: Long): Flow<List<Programme>> =
         programmeDao.observeWindow(fromUtcMillis, toUtcMillis)
+
+    /**
+     * The guide window for just these guide channel ids. Chunked under SQLite's 999 bound-variable
+     * cap (older Android) and recombined; a huge id set (an "All channels" view of a big provider)
+     * falls back to the plain time-only [observeWindow], which is cheaper than dozens of queries.
+     */
+    fun observeWindowFor(
+        channelIds: Collection<String>,
+        fromUtcMillis: Long,
+        toUtcMillis: Long,
+    ): Flow<List<Programme>> {
+        if (channelIds.isEmpty()) return flowOf(emptyList())
+        if (channelIds.size > MAX_IDS_FOR_SCOPED_WINDOW) return observeWindow(fromUtcMillis, toUtcMillis)
+        val chunks = channelIds.toList().chunked(ID_CHUNK)
+        return if (chunks.size == 1) {
+            programmeDao.observeWindowFor(chunks[0], fromUtcMillis, toUtcMillis)
+        } else {
+            combine(chunks.map { programmeDao.observeWindowFor(it, fromUtcMillis, toUtcMillis) }) { parts ->
+                parts.flatMap { it }
+            }
+        }
+    }
 
     fun observeNow(nowUtcMillis: Long): Flow<List<Programme>> =
         programmeDao.observeNow(nowUtcMillis)
@@ -343,6 +367,12 @@ class EpgRepository(
 
     companion object {
         private const val TAG = "EpgRepository"
+
+        /** Ids per scoped programme query — safely under SQLite's 999 bound-variable cap. */
+        private const val ID_CHUNK = 900
+
+        /** Beyond this many guide ids, one time-only window query beats many scoped ones. */
+        private const val MAX_IDS_FOR_SCOPED_WINDOW = 9_000
 
         /** Writes per transaction. Large enough to be fast, small enough not to hold WAL open. */
         const val BATCH_SIZE = 500

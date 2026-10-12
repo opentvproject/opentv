@@ -8,9 +8,11 @@ package app.opentv.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.Category
 import app.opentv.data.model.Channel
+import app.opentv.data.model.shownName
 import app.opentv.data.model.EpgFeed
 import app.opentv.data.model.LiveStreamFormat
 import app.opentv.data.model.Movie
@@ -48,6 +50,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.debounce
@@ -229,18 +232,45 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
      * filter across every underlying id at once. This is the on-device version of what
      * Viewella did on a server it had to pay for.
      */
-    data class CategoryGroup(val key: String, val label: String, val ids: List<String>)
+    data class CategoryGroup(
+        val key: String,
+        val label: String,
+        val ids: List<String>,
+        /** [AppSettings.categoryKey] of every provider category folded in — what switching off uses. */
+        val categoryKeys: List<String> = emptyList(),
+    )
 
-    val categoryGroups: StateFlow<List<CategoryGroup>> =
+    /**
+     * The guide's category groups, minus every category the user switched off. Cold, so start-up
+     * can tell "categories not read yet" apart from "there are none" (see [pickFirstCategory]).
+     */
+    private val categoryGroupsFlow =
         combine(
             graph.catalogRepository.observeCategories(StreamKind.LIVE),
             selectedSource,
-        ) { raw, sourceId ->
+            settings.playlistMode,
+            settings.offCategories,
+        ) { raw, sourceId, mode, off ->
             // Scope the category rail to the chosen provider, so a second playlist's categories show
             // on their own (cardiodoc's "keep sources separate"); null folds across every provider.
-            val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
-            foldCategories(scoped)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            val scoped = raw.filter {
+                (sourceId == null || it.sourceId == sourceId) &&
+                    AppSettings.categoryKey(it.sourceId, it.id) !in off
+            }
+            groupCategories(scoped, mode)
+        }.flowOn(Dispatchers.Default)
+
+    val categoryGroups: StateFlow<List<CategoryGroup>> =
+        categoryGroupsFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private fun groupCategories(raw: List<Category>, mode: AppSettings.PlaylistMode): List<CategoryGroup> =
+        if (mode == AppSettings.PlaylistMode.ORIGINAL) {
+            raw.map {
+                CategoryGroup(it.id, it.name, listOf(it.id), listOf(AppSettings.categoryKey(it.sourceId, it.id)))
+            }
+        } else {
+            foldCategories(raw)
+        }
 
     /**
      * Folds codec-split provider categories into one logical [CategoryGroup] each — 'UK| GENERAL
@@ -249,14 +279,37 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
      * [managerCategoryGroups] so both group the rail identically.
      */
     private fun foldCategories(raw: List<Category>): List<CategoryGroup> {
-        val groups = LinkedHashMap<String, Pair<String, MutableList<String>>>()
+        class Acc(val label: String) {
+            val ids = mutableListOf<String>()
+            val keys = mutableListOf<String>()
+        }
+        val groups = LinkedHashMap<String, Acc>()
         for (category in raw) {
             val n = ChannelNameNormalizer.normalize(category.name)
             val key = n.groupKey.ifEmpty { category.id }
-            val entry = groups.getOrPut(key) { n.baseName to mutableListOf() }
-            entry.second += category.id
+            val entry = groups.getOrPut(key) { Acc(n.baseName) }
+            entry.ids += category.id
+            entry.keys += AppSettings.categoryKey(category.sourceId, category.id)
         }
-        return groups.map { (key, value) -> CategoryGroup(key, value.first, value.second) }
+        return groups.map { (key, acc) -> CategoryGroup(key, acc.label, acc.ids, acc.keys) }
+    }
+
+    /** Channels whose provider category the user switched off — they're never loaded into the guide. */
+    private fun List<Channel>.withoutOffCategories(off: Set<String>): List<Channel> =
+        if (off.isEmpty()) this else filter { AppSettings.categoryKey(it.sourceId, it.categoryId) !in off }
+
+    /** The switched-off categories, for the channel managers to show and toggle. */
+    val offCategories: StateFlow<Set<String>> = settings.offCategories
+
+    /** Switch a whole (logical) category off — its channels vanish from the guide — or back on. */
+    fun setCategoryOff(group: CategoryGroup, off: Boolean) {
+        if (off && !favouritesOnly.value && selectedCategory.value == group.key) {
+            // Don't leave the guide sitting on a category that just disappeared: move to the next one.
+            val visible = visibleCategoryGroups.value
+            val index = visible.indexOfFirst { it.key == group.key }
+            selectedCategory.value = (visible.getOrNull(index + 1) ?: visible.getOrNull(index - 1))?.key
+        }
+        settings.setCategoriesOff(group.categoryKeys, off)
     }
 
     /**
@@ -270,17 +323,50 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** The rail's view of categories: hidden ones drop out until the session is unlocked. */
-    val visibleCategoryGroups: StateFlow<List<CategoryGroup>> =
-        combine(categoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
+    private val visibleCategoryGroupsFlow =
+        combine(categoryGroupsFlow, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
             if (unlocked) groups else groups.filter { it.key !in hidden }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }
+
+    val visibleCategoryGroups: StateFlow<List<CategoryGroup>> =
+        visibleCategoryGroupsFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * True while the guide is still deciding what to open on. Nothing is loaded meanwhile — the
+     * old behaviour of building "All channels" (every channel against the whole EPG window) at
+     * start-up was the slowest thing the app did, and nobody needs all 20k rows to start watching.
+     */
+    private val startupPending = MutableStateFlow(true)
+    private var pickJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Open the guide on the first visible category. Waits until categories are on disk (a fresh
+     * install's first sync writes them before any channels); a catalogue with channels but no
+     * categories at all (some M3U files) falls back to All.
+     */
+    private fun pickFirstCategory() {
+        startupPending.value = true
+        pickJob?.cancel()
+        pickJob = viewModelScope.launch {
+            val first = combine(visibleCategoryGroupsFlow, graph.catalogRepository.observeChannelCount()) { groups, count ->
+                groups to count
+            }.first { (groups, count) -> groups.isNotEmpty() || count > 0 }.first.firstOrNull()
+            if (startupPending.value) {
+                selectedCategory.value = first?.key
+                favouritesOnly.value = false
+                startupPending.value = false
+            }
+        }
+    }
+
+    init { pickFirstCategory() }
 
     /**
      * One row on screen = one *logical* channel.
      *
      * [primary] is the best-quality variant and what plays on click; [variants] is every
-     * quality of the same channel, for the in-player switch. `UK| BBC ONE SD/HD/FHD/RAW`
-     * is one row, not four — the guide has one BBC One, and so should we.
+     * quality of the same channel, for the in-player switch. In merged mode `UK| BBC ONE SD/HD/FHD/RAW`
+     * is one row, not four; in original playlist mode each channel is kept as its own row.
      */
     @androidx.compose.runtime.Immutable
     data class Row(
@@ -290,8 +376,11 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         val next: Programme?,
         /** Every programme for this channel inside the guide window, start-ordered. */
         val programmes: List<Programme>,
+        val rawName: Boolean = false,
     ) {
-        val key: Any get() = if (primary.groupKey.isEmpty()) primary.id else primary.groupKey
+        val key: Any get() = if (primary.groupKey.isEmpty() || variants.size <= 1) primary.id else primary.groupKey
+        val shownTitle: String get() = primary.shownName(rawName)
+        val shownName: String get() = shownTitle
     }
 
     /**
@@ -331,89 +420,100 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private data class RowsKey(
+        /** Still choosing the start-up category: load nothing yet. */
+        val pending: Boolean,
+        /** null = All; empty = a category that no longer exists (shows nothing, never "All"). */
         val categoryIds: List<String>?,
         val favs: Boolean,
         val query: String,
         val hiddenIds: Set<String>,
+        val offKeys: Set<String>,
+        val playlistMode: AppSettings.PlaylistMode,
+        val source: Long?,
     )
-
-    /**
-     * The whole guide window's programmes, grouped by their EPG channel id once — the single
-     * expensive step. Grouping the entire catalogue's programmes (hundreds of thousands of rows
-     * on a big provider) is what made every category tap slow, because it used to run inside the
-     * per-category flow and rebuild from scratch each time. Built here once, shared across every
-     * category switch, so a tap only has to regroup that category's channels — quick.
-     *
-     * Keyed on the half-hour bucket (not the raw minute tick) so it holds steady while you flick
-     * between categories and refreshes at most twice an hour; the underlying Room flow also
-     * re-emits on its own when an EPG sync lands new programmes.
-     */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val programmeIndex: StateFlow<Map<String, List<Programme>>> =
-        // windowStartMillis is a StateFlow, which already conflates equal values — an explicit
-        // distinctUntilChanged() on it is a no-op (and a build error under our warnings-as-errors).
-        windowStartMillis
-            .flatMapLatest { windowStart ->
-                graph.epgRepository
-                    .observeWindow(windowStart, windowStart + GUIDE_LOOKAHEAD_MILLIS)
-                    .map { programmes -> programmes.groupBy { it.epgChannelId } }
-            }
-            .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     /** Guards the start-up loading bar so it shows once, on the first build, not on every tap. */
     @Volatile
     private var guideBuilt = false
 
+    /**
+     * The guide's rows for whatever's selected.
+     *
+     * Speed comes from only ever reading what's on screen: the selected category's channels, then
+     * the guide window for *just those channels' guide ids* (see [EpgRepository.observeWindowFor]).
+     * The old pipeline read and grouped the whole catalogue's programme window — hundreds of
+     * thousands of rows on a big provider — before anything could show, and again whenever an EPG
+     * sync touched the table. A category is a few hundred channels, so a tap is now a small query.
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     val rows: StateFlow<List<Row>> =
-        combine(selectedCategory, favouritesOnly, query, categoryGroups, hiddenCategoryIds) {
-                category, favs, q, groups, hidden ->
-            val ids = category?.let { key -> groups.firstOrNull { it.key == key }?.ids }
-            RowsKey(ids, favs, q, hidden)
+        combine(
+            combine(selectedCategory, categoryGroups, startupPending) { category, groups, pending ->
+                pending to category?.let { key -> groups.firstOrNull { it.key == key }?.ids ?: emptyList() }
+            },
+            favouritesOnly,
+            query,
+            combine(hiddenCategoryIds, settings.offCategories) { hidden, off -> hidden to off },
+            combine(settings.playlistMode, selectedSource) { mode, source -> mode to source },
+        ) { (pending, ids), favs, q, (hidden, off), (mode, source) ->
+            RowsKey(pending, ids, favs, q, hidden, off, mode, source)
         }
-            .combine(selectedSource) { key, source -> key to source }
-            .flatMapLatest { (key, source) ->
+            // Category lists re-emit on every sync; only rebuild when the selection really changed.
+            .distinctUntilChanged()
+            .flatMapLatest { key ->
+                if (key.pending) return@flatMapLatest flowOf(emptyList())
                 val channelFlow = when {
                     key.query.isNotBlank() -> graph.catalogRepository.searchChannels(key.query)
                     key.favs -> graph.catalogRepository.observeFavouriteChannels()
+                    key.categoryIds?.isEmpty() == true -> flowOf(emptyList())
                     key.categoryIds != null -> graph.catalogRepository.observeChannelsIn(key.categoryIds)
-                    else -> graph.catalogRepository.observeChannels(source)
+                    else -> graph.catalogRepository.observeChannels(key.source)
                 }
-                // Combine the (per-category) channel list with the shared, already-grouped
-                // programme index. Switching category rebuilds only the channel→row grouping;
-                // the heavy programme grouping happened once and is reused, so a tap is quick.
-                // Deliberately NOT combined with the minute tick: building "All channels" (20k
-                // rows) can take longer than 60s, and a tick landing mid-build would cancel and
-                // restart it via flatMapLatest so it would never finish. "Now" is captured per
-                // build instead; the guide's live progress bars advance off the screen's clock.
-                combine(channelFlow, programmeIndex) { channels, byEpgChannel ->
-                    val now = System.currentTimeMillis()
-                    // Scope to the chosen provider. The "All" branch already fetched only this source
-                    // in SQL, so this is a no-op there; for favourites/search/category (which don't
-                    // take a sourceId) it's what actually keeps a second playlist separate.
-                    val scoped = if (source == null) channels else channels.filter { it.sourceId == source }
-                    // Adult/hidden channels drop out everywhere they could otherwise leak —
-                    // All, search and favourites — until the session is unlocked.
-                    val visible =
-                        if (key.hiddenIds.isEmpty()) scoped
-                        else scoped.filter { it.categoryId !in key.hiddenIds }
-                    // Show the size-aware loading bar for the FIRST guide build only (start-up).
-                    // After that the guide is built and flicking between categories is cheap, so
-                    // don't flash a loading line on every tap — that bar was only ever meant for
-                    // the one-time heavy load, and leaking it per-category read as a stuck "100%".
-                    val firstBuild = !guideBuilt
-                    if (firstBuild) StatusBus.set(sizeMessage(visible.size), 0f)
-                    buildRows(visible, byEpgChannel, now, reportProgress = firstBuild)
-                }
+                channelFlow
+                    .map { channels ->
+                        // Scope to the chosen provider. The "All" branch already fetched only this
+                        // source in SQL, so this is a no-op there; for favourites/search/category
+                        // (which don't take a sourceId) it's what keeps a second playlist separate.
+                        val scoped = if (key.source == null) channels else channels.filter { it.sourceId == key.source }
+                        // Adult/hidden and switched-off categories drop out everywhere they could
+                        // otherwise leak — All, search and favourites.
+                        val visible =
+                            if (key.hiddenIds.isEmpty()) scoped
+                            else scoped.filter { it.categoryId !in key.hiddenIds }
+                        visible.withoutOffCategories(key.offKeys)
+                    }
+                    // A favourite toggle elsewhere re-emits the channel table; skip identical lists.
+                    .distinctUntilChanged()
+                    .flatMapLatest { visible ->
+                        val guideIds = HashSet<String>()
+                        visible.forEach { guideIds.addAll(it.epgCandidates) }
+                        // Not combined with the minute tick: "now" is captured per build, and the
+                        // guide's live progress bars advance off the screen's own clock. The window
+                        // only moves on the half-hour, which re-reads this category's programmes.
+                        windowStartMillis.flatMapLatest { windowStart ->
+                            graph.epgRepository.observeWindowFor(
+                                guideIds, windowStart, windowStart + GUIDE_LOOKAHEAD_MILLIS,
+                            )
+                        }.map { programmes ->
+                            // Show the size-aware loading bar for the FIRST guide build only.
+                            val firstBuild = !guideBuilt
+                            if (firstBuild) StatusBus.set(sizeMessage(visible.size), 0f)
+                            buildRows(
+                                channels = visible,
+                                byEpgChannel = programmes.groupBy { it.epgChannelId },
+                                now = System.currentTimeMillis(),
+                                reportProgress = firstBuild,
+                                mergeChannels = (key.playlistMode == AppSettings.PlaylistMode.MERGED),
+                                rawNames = (key.playlistMode == AppSettings.PlaylistMode.ORIGINAL),
+                            )
+                        }
+                    }
             }
-            // Grouping thousands of channels against a 12-hour, all-feeds programme window is heavy
-            // enough to freeze the UI for a big provider — a category tap that took minutes. Run the
-            // whole pipeline off the main thread so the list just appears when it's ready.
+            // Building rows is list work; keep it off the main thread so the UI never stalls.
             .flowOn(Dispatchers.Default)
             // Once the first guide is on screen, clear the start-up bar — and never show it for a
             // plain category switch again.
-            .onEach { if (!guideBuilt) { guideBuilt = true; StatusBus.set(null) } }
+            .onEach { if (!guideBuilt && !startupPending.value) { guideBuilt = true; StatusBus.set(null) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private fun buildRows(
@@ -421,24 +521,30 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         byEpgChannel: Map<String, List<Programme>>,
         now: Long,
         reportProgress: Boolean = false,
+        mergeChannels: Boolean = true,
+        rawNames: Boolean = false,
     ): List<Row> {
-        // The programme→channel grouping is done once upstream (see [programmeIndex]) and passed
-        // in ready-made, rather than regrouping the whole EPG on every category tap. Grouping is
-        // kept out of SQL because the programme query cannot take a channel-id list without
-        // hitting SQLite's bound-variable cap, and quality-variant folding is pure list work.
+        // The programmes arrive already read for just these channels and grouped by guide id (see
+        // [rows]); quality-variant folding is pure list work.
         val groups = LinkedHashMap<Any, MutableList<Channel>>()
         for (channel in channels) {
-            val key: Any = channel.groupKey.ifEmpty { channel.id }
+            val key: Any = if (mergeChannels) {
+                channel.groupKey.ifEmpty { channel.id }
+            } else {
+                channel.id
+            }
             groups.getOrPut(key) { mutableListOf() } += channel
         }
 
         val total = groups.size.coerceAtLeast(1)
         var built = 0
         return groups.values.map { group ->
-            group.sortByDescending { it.qualityRank }
-            // Only genuinely different qualities are switchable; identical-quality dupes
-            // (same stream in two categories) collapse to one, so no false "2 qualities".
-            val variants = distinctByQuality(group)
+            val variants = if (mergeChannels) {
+                group.sortByDescending { it.qualityRank }
+                distinctByQuality(group)
+            } else {
+                group
+            }
             val primary = variants.first()
 
             // Walk every variant's guide-id candidates (override → provider → matched)
@@ -465,6 +571,7 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                 now = list.firstOrNull { it.isLiveAt(now) },
                 next = list.firstOrNull { it.startUtcMillis > now },
                 programmes = list,
+                rawName = rawNames,
             )
         }
     }
@@ -479,7 +586,9 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val favourites: StateFlow<List<Channel>> =
-        graph.catalogRepository.observeFavouriteChannels()
+        combine(graph.catalogRepository.observeFavouriteChannels(), settings.offCategories) { favs, off ->
+            favs.withoutOffCategories(off)
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -496,20 +605,26 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun selectCategory(id: String?) {
+        startupPending.value = false
         favouritesOnly.value = false
         selectedCategory.value = id
     }
 
     fun selectFavourites() {
+        startupPending.value = false
         favouritesOnly.value = true
         selectedCategory.value = null
     }
 
-    /** Switch the live guide's provider filter; the category resets since categories differ per source. */
+    /**
+     * Switch the live guide's provider filter. Categories differ per source, so the guide reopens
+     * on the new source's first category — never on a full "All" load.
+     */
     fun selectSource(sourceId: Long?) {
         selectedSource.value = sourceId
         selectedCategory.value = null
         favouritesOnly.value = false
+        pickFirstCategory()
     }
 
     fun search(text: String) { query.value = text }
@@ -524,16 +639,25 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val searchResults: StateFlow<List<Row>> =
-        searchInput
-            .map { it.trim() }
-            .debounce(200)
-            .distinctUntilChanged()
-            .flatMapLatest { q ->
+        combine(
+            searchInput.map { it.trim() }.debounce(200).distinctUntilChanged(),
+            settings.playlistMode,
+            settings.offCategories,
+        ) { q, mode, off -> Triple(q, mode, off) }
+            .flatMapLatest { (q, mode, off) ->
                 if (q.length < 2) flowOf(emptyList())
                 else graph.catalogRepository.searchChannels(q)
                     // No EPG here — group channels into rows with no now/next. Finding and
                     // playing the channel is the job; guide detail would cost the slow query.
-                    .map { channels -> buildRows(channels, emptyMap(), System.currentTimeMillis()) }
+                    .map { channels ->
+                        buildRows(
+                            channels.withoutOffCategories(off),
+                            emptyMap(),
+                            System.currentTimeMillis(),
+                            mergeChannels = (mode == AppSettings.PlaylistMode.MERGED),
+                            rawNames = (mode == AppSettings.PlaylistMode.ORIGINAL),
+                        )
+                    }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -546,14 +670,22 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val managerResults: StateFlow<List<Row>> =
-        managerInput
-            .map { it.trim() }
-            .debounce(200)
-            .distinctUntilChanged()
-            .flatMapLatest { q ->
+        combine(
+            managerInput.map { it.trim() }.debounce(200).distinctUntilChanged(),
+            settings.playlistMode,
+        ) { q, mode -> q to mode }
+            .flatMapLatest { (q, mode) ->
                 if (q.length < 2) flowOf(emptyList())
                 else graph.catalogRepository.searchChannelsIncludingHidden(q)
-                    .map { channels -> buildRows(channels, emptyMap(), System.currentTimeMillis()) }
+                    .map { channels ->
+                        buildRows(
+                            channels,
+                            emptyMap(),
+                            System.currentTimeMillis(),
+                            mergeChannels = (mode == AppSettings.PlaylistMode.MERGED),
+                            rawNames = (mode == AppSettings.PlaylistMode.ORIGINAL),
+                        )
+                    }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -584,9 +716,10 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         combine(
             graph.catalogRepository.observeCategories(StreamKind.LIVE),
             managerSelectedSource,
-        ) { raw, sourceId ->
+            settings.playlistMode,
+        ) { raw, sourceId, mode ->
             val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
-            foldCategories(scoped)
+            groupCategories(scoped, mode)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -596,15 +729,23 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val managerRows: StateFlow<List<Row>> =
-        combine(managerSelectedSource, managerSelectedCategory, managerCategoryGroups) { source, key, groups ->
+        combine(managerSelectedSource, managerSelectedCategory, managerCategoryGroups, settings.playlistMode) { source, key, groups, mode ->
             val ids = key?.let { k -> groups.firstOrNull { it.key == k }?.ids }
-            source to ids
+            Triple(source, ids, mode)
         }
             .distinctUntilChanged()
-            .flatMapLatest { (source, ids) ->
+            .flatMapLatest { (source, ids, mode) ->
                 if (ids.isNullOrEmpty()) flowOf(emptyList())
                 else graph.catalogRepository.observeChannelsInIncludingHidden(source, ids)
-                    .map { channels -> buildRows(channels, emptyMap(), System.currentTimeMillis()) }
+                    .map { channels ->
+                        buildRows(
+                            channels,
+                            emptyMap(),
+                            System.currentTimeMillis(),
+                            mergeChannels = (mode == AppSettings.PlaylistMode.MERGED),
+                            rawNames = (mode == AppSettings.PlaylistMode.ORIGINAL),
+                        )
+                    }
             }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

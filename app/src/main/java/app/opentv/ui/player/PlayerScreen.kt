@@ -96,6 +96,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
@@ -109,10 +110,13 @@ import app.opentv.ui.RecordingBackgroundPrompt
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
@@ -169,7 +173,7 @@ fun PlayerScreen(
     }
 
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
-    var currentId by remember { mutableStateOf<Long?>(null) }
+    var currentId by remember(channelId) { mutableStateOf(channelId) }
     // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
     // Digits typed on the remote accumulate here, then jump to that channel number after a beat.
@@ -207,9 +211,11 @@ fun PlayerScreen(
     val rootFocus = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
 
-    // The channel list you were browsing, for channel up/down and the in-player list. Snapshotted
-    // on entry so it doesn't shift under you mid-session.
-    val queue = remember { PlaybackQueue.items }
+    val invertChannelKeys by settings.invertChannelKeys.collectAsState()
+
+    // The channel list you were browsing, for channel up/down and the in-player list.
+    // Reactive so it updates if loaded asynchronously or restored on boot.
+    var queue by remember { mutableStateOf(PlaybackQueue.items) }
 
     fun reveal() {
         controlsVisible = true
@@ -227,7 +233,7 @@ fun PlayerScreen(
             controller.play(
                 PlayerController.Request(
                     url = url,
-                    title = channel.shownName,
+                    title = channel.shownName(settings.playlistMode.value == AppSettings.PlaylistMode.ORIGINAL),
                     userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                     isLive = true,
                 ),
@@ -236,22 +242,103 @@ fun PlayerScreen(
         }
     }
 
+    var tuneJob by remember { mutableStateOf<Job?>(null) }
+
     fun playChannelId(id: Long) {
         // Remember where we came from so "Last channel" can bounce straight back. Quality switches
         // go through tuneTo directly, so they never count as a channel change here.
         currentId?.let { if (it != id) previousId = it }
-        scope.launch {
+        currentId = id
+        tuneJob?.cancel()
+        tuneJob = scope.launch {
             val channel = graph.catalogRepository.channel(id) ?: return@launch
             variants = graph.catalogRepository.variants(channel)
             tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
         }
     }
 
+    /** Finds the 0-based index of the currently active channel in [queue], resolving variants and names. */
+    fun findCurrentIndex(): Int {
+        if (queue.isEmpty()) return -1
+        val targetId = currentId ?: channelId
+        // 1. Direct ID match
+        val direct = queue.indexOfFirst { it.id == targetId }
+        if (direct >= 0) return direct
+
+        // 2. Match against any quality variant of the current channel
+        val variantIds = variants.map { it.id }.toSet()
+        val variantMatch = queue.indexOfFirst { it.id in variantIds }
+        if (variantMatch >= 0) return variantMatch
+
+        // 3. Fallback: match by channel number or name
+        val currentChannel = variants.firstOrNull { it.id == targetId }
+        if (currentChannel != null) {
+            val byNumber = currentChannel.number?.let { num ->
+                queue.indexOfFirst { it.number == num }
+            } ?: -1
+            if (byNumber >= 0) return byNumber
+
+            val byName = queue.indexOfFirst {
+                it.name.equals(currentChannel.name, ignoreCase = true) ||
+                it.name.equals(currentChannel.displayName, ignoreCase = true)
+            }
+            if (byName >= 0) return byName
+        }
+        return -1
+    }
+
     fun zapBy(delta: Int) {
         if (queue.isEmpty()) return
-        val cur = queue.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
-        val next = (cur + delta).coerceIn(0, queue.size - 1)
-        if (next != cur) playChannelId(queue[next].id)
+        val cur = findCurrentIndex()
+        if (cur < 0) {
+            // Channel not in current queue (e.g. queue was for another category or empty).
+            // Fetch playlist channels from DB rather than arbitrarily jumping to 0.
+            scope.launch {
+                val targetId = currentId ?: channelId ?: return@launch
+                val channel = graph.catalogRepository.channel(targetId) ?: return@launch
+                val rawNames = (settings.playlistMode.value == AppSettings.PlaylistMode.ORIGINAL)
+                val channels = withContext(Dispatchers.IO) {
+                    graph.catalogRepository.observeChannels(channel.sourceId).firstOrNull()
+                        ?: graph.catalogRepository.observeChannels(null).firstOrNull()
+                        ?: emptyList()
+                }
+                if (channels.isNotEmpty()) {
+                    val newItems = channels.map {
+                        PlaybackQueue.Item(it.id, it.shownName(rawNames), it.logoUrl, it.number)
+                    }
+                    queue = newItems
+                    PlaybackQueue.items = newItems
+                    val newCur = newItems.indexOfFirst { it.id == channel.id }
+                    if (newCur >= 0) {
+                        val next = (newCur + delta).mod(newItems.size)
+                        playChannelId(newItems[next].id)
+                    }
+                }
+            }
+            return
+        }
+
+        val next = (cur + delta).mod(queue.size)
+        val nextItem = queue[next]
+        currentId = nextItem.id
+        playChannelId(nextItem.id)
+    }
+
+    fun zapChannel(up: Boolean) {
+        // Standard TV remote convention: Channel Up (CH+ / Page Up) advances to next channel (+1),
+        // Channel Down (CH- / Page Down) goes to previous channel (-1). Invertible in settings.
+        val delta = if (up) {
+            if (invertChannelKeys) -1 else 1
+        } else {
+            if (invertChannelKeys) 1 else -1
+        }
+        zapBy(delta)
+    }
+
+    fun zapDirection(up: Boolean) {
+        // D-Pad navigation: Up is visual up in list (-1), Down is visual down (+1).
+        val delta = if (up) -1 else 1
+        zapBy(delta)
     }
 
     fun toggleRecord() {
@@ -273,7 +360,25 @@ fun PlayerScreen(
         val id = channelId ?: return@LaunchedEffect
         val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
         variants = graph.catalogRepository.variants(channel)
-        tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
+        val toPlay = variants.firstOrNull { it.id == channel.id } ?: channel
+        tuneTo(toPlay)
+
+        // Ensure queue is populated (e.g. when booted straight to last channel or opened from search)
+        if (queue.isEmpty() || findCurrentIndex() < 0) {
+            val rawNames = (settings.playlistMode.value == AppSettings.PlaylistMode.ORIGINAL)
+            val channels = withContext(Dispatchers.IO) {
+                graph.catalogRepository.observeChannels(channel.sourceId).firstOrNull()
+                    ?: graph.catalogRepository.observeChannels(null).firstOrNull()
+                    ?: emptyList()
+            }
+            if (channels.isNotEmpty()) {
+                val newItems = channels.map {
+                    PlaybackQueue.Item(it.id, it.shownName(rawNames), it.logoUrl, it.number)
+                }
+                queue = newItems
+                PlaybackQueue.items = newItems
+            }
+        }
     }
 
     // Sleep timer: when the armed deadline passes, stop and leave the player. Re-arming from
@@ -346,6 +451,9 @@ fun PlayerScreen(
     }
 
     // Focus the channel list when it opens; hand focus back to the video catcher when it closes.
+    LaunchedEffect(Unit) {
+        runCatching { rootFocus.requestFocus() }
+    }
     LaunchedEffect(channelListVisible) {
         if (channelListVisible) {
             delay(40)
@@ -370,16 +478,17 @@ fun PlayerScreen(
                         numberEntry = (numberEntry + digit).take(4)
                         reveal(); interaction++; true
                     }
+                    // Dedicated remote channel keys (CH+, CH-, PageUp, PageDown) always change channels.
+                    event.key == Key.ChannelUp || event.key == Key.PageUp -> { zapChannel(up = true); reveal(); true }
+                    event.key == Key.ChannelDown || event.key == Key.PageDown -> { zapChannel(up = false); reveal(); true }
                     // A picker or the channel list owns the whole d-pad while it's up.
                     channelListVisible || panel != Panel.NONE -> {
                         interaction++
                         false
                     }
-                    // Channel up/down works whether or not the bar is showing — this remote has no
-                    // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the bar as a
-                    // channel banner, then it auto-hides.
-                    event.key == Key.DirectionUp || event.key == Key.ChannelUp -> { zapBy(-1); reveal(); true }
-                    event.key == Key.DirectionDown || event.key == Key.ChannelDown -> { zapBy(1); reveal(); true }
+                    // D-pad channel up/down works whether or not the bar is showing.
+                    event.key == Key.DirectionUp -> { zapDirection(up = true); reveal(); true }
+                    event.key == Key.DirectionDown -> { zapDirection(up = false); reveal(); true }
                     // With the bar up, left/right drive its buttons; let them through.
                     controlsVisible -> {
                         interaction++
@@ -590,7 +699,7 @@ fun PlayerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart),
         ) {
-            val currentIndex = queue.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+            val currentIndex = findCurrentIndex().coerceAtLeast(0)
             val listState = rememberLazyListState()
             LaunchedEffect(Unit) { runCatching { listState.scrollToItem(currentIndex) } }
             Column(

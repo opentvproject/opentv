@@ -84,6 +84,10 @@ fun ChannelManagerScreen(
     val selectedSource by viewModel.managerSelectedSource.collectAsState()
     val selectedCategory by viewModel.managerSelectedCategory.collectAsState()
     val browseRows by viewModel.managerRows.collectAsState()
+    val offCategories by viewModel.offCategories.collectAsState()
+    // A logical category counts as switched off once every provider category folded into it is.
+    fun isOff(group: ChannelsViewModel.CategoryGroup) =
+        group.categoryKeys.isNotEmpty() && group.categoryKeys.all { it in offCategories }
 
     // Search is one option among browse-by-category: the "Search" rail entry flips the right pane
     // to the original keyboard-driven search, which is kept intact rather than thrown away.
@@ -177,8 +181,9 @@ fun ChannelManagerScreen(
                 items(categoryGroups, key = { "cat-${it.key}" }) { group ->
                     val groupSelected = !searchMode && selectedCategory == group.key
                     RailEntry(
-                        label = group.label,
+                        label = if (isOff(group)) stringResource(R.string.channels_category_off_suffix, group.label) else group.label,
                         selected = groupSelected,
+                        dimmed = isOff(group),
                         onClick = { searchMode = false; viewModel.selectManagerCategory(group.key) },
                         modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
@@ -204,6 +209,15 @@ fun ChannelManagerScreen(
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                     )
                 } else {
+                    val group = categoryGroups.firstOrNull { it.key == selectedCategory }
+                    if (group != null) {
+                        val off = isOff(group)
+                        CategorySwitch(
+                            label = group.label,
+                            off = off,
+                            onToggle = { viewModel.setCategoryOff(group, !off) },
+                        )
+                    }
                     BrowsePane(
                         hasCategories = categoryGroups.isNotEmpty(),
                         categorySelected = selectedCategory != null,
@@ -297,6 +311,7 @@ private fun RailEntry(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    dimmed: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val bg = when {
@@ -313,7 +328,7 @@ private fun RailEntry(
         text = label,
         style = MaterialTheme.typography.titleMedium,
         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = fg,
+        color = if (dimmed && !focused) fg.copy(alpha = 0.5f) else fg,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
@@ -324,6 +339,42 @@ private fun RailEntry(
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     )
+}
+
+/**
+ * The whole-category switch above the channel list. Off = the category is decluttered: its
+ * channels aren't loaded into Live TV, search or favourites at all (unlike hiding single channels,
+ * this is for whole categories you never watch). The same switch exists on the phone/web manager.
+ */
+@Composable
+private fun CategorySwitch(label: String, off: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (off) stringResource(R.string.channels_category_off_hint)
+                else stringResource(R.string.channels_category_in_guide),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = !off, onCheckedChange = { onToggle() })
+    }
 }
 
 @Composable
@@ -368,7 +419,7 @@ private fun ManagerRow(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                row.primary.shownName,
+                row.shownName,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
                 maxLines = 1,

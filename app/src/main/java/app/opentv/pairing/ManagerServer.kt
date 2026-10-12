@@ -223,6 +223,8 @@ class ManagerServer(
 
             method == "POST" && path == "/channel" -> handleChannelPatch(output, body)
 
+            method == "POST" && path == "/category" -> handleCategoryPatch(output, body)
+
             method == "POST" && path == "/reorder" -> handleReorder(output, body)
 
             method == "GET" && path == "/recording" ->
@@ -251,10 +253,11 @@ class ManagerServer(
 
     // ---- Routes --------------------------------------------------------------------------------
 
-    /** `{ sources:[{id,name}], categories:[{id,label,sourceId,count}] }` */
+    /** `{ sources:[{id,name}], categories:[{id,label,sourceId,count,hidden}] }` */
     private fun metaJson(): String = runBlocking {
         val sources = catalog.enabledSources()
         val sourceIds = sources.map { it.id }.toSet()
+        val off = settings.offCategories.value
         val counts = catalog.categoryChannelCounts()
             .associateBy({ it.sourceId to it.categoryId }, { it.count })
         // Only categories that belong to an enabled source AND actually hold channels — an empty
@@ -265,7 +268,13 @@ class ManagerServer(
             .mapNotNull { cat ->
                 val count = counts[cat.sourceId to cat.id] ?: 0
                 if (count <= 0) null
-                else CategoryDto(id = cat.id, label = cat.name, sourceId = cat.sourceId, count = count)
+                else CategoryDto(
+                    id = cat.id,
+                    label = cat.name,
+                    sourceId = cat.sourceId,
+                    count = count,
+                    hidden = AppSettings.categoryKey(cat.sourceId, cat.id) in off,
+                )
             }
         json.encodeToString(
             MetaDto.serializer(),
@@ -297,6 +306,21 @@ class ManagerServer(
             // A blank name clears the rename back to the provider's own (see setChannelCustomName).
             patch.name?.let { catalog.setChannelCustomName(patch.id, it) }
         }
+        writeOk(output)
+    }
+
+    /**
+     * `POST /category {sourceId, id, hidden}` → switch a whole category off (its channels are no
+     * longer loaded into the TV's guide, search or favourites) or back on. Same setting the TV's
+     * own channel manager flips, so the change shows on the TV straight away.
+     */
+    private fun handleCategoryPatch(output: OutputStream, body: String) {
+        val patch = runCatching { json.decodeFromString(CategoryPatch.serializer(), body) }.getOrNull()
+        if (patch == null || patch.id.isBlank()) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Bad request."))
+            return
+        }
+        settings.setCategoriesOff(listOf(AppSettings.categoryKey(patch.sourceId, patch.id)), patch.hidden)
         writeOk(output)
     }
 
@@ -498,7 +522,16 @@ class ManagerServer(
 
 @Serializable private data class SourceDto(val id: Long, val name: String)
 
-@Serializable private data class CategoryDto(val id: String, val label: String, val sourceId: Long, val count: Int)
+@Serializable private data class CategoryDto(
+    val id: String,
+    val label: String,
+    val sourceId: Long,
+    val count: Int,
+    /** Switched off: not loaded into the TV's Live TV at all. */
+    val hidden: Boolean = false,
+)
+
+@Serializable private data class CategoryPatch(val sourceId: Long, val id: String, val hidden: Boolean)
 
 @Serializable private data class ChannelDto(
     val id: Long,

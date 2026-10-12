@@ -172,8 +172,11 @@ data class Channel(
         get() = listOfNotNull(epgOverrideId, epgChannelId, matchedEpgId)
 }
 
-/** What the UI should show for a channel: the user's rename if set, else the cleaned display name. */
-val Channel.shownName: String get() = customName?.takeIf { it.isNotBlank() } ?: displayName
+/** What the UI should show for a channel: the user's rename if set, else the cleaned display name (or verbatim name if rawName = true). */
+fun Channel.shownName(rawName: Boolean = false): String =
+    customName?.takeIf { it.isNotBlank() } ?: if (rawName) name else displayName
+
+val Channel.shownName: String get() = shownName(false)
 
 /**
  * One guide feed: where XMLTV comes from.

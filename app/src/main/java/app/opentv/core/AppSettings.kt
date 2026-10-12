@@ -44,6 +44,16 @@ class AppSettings private constructor(context: Context) {
     private val _channelLayout = MutableStateFlow(readChannelLayout())
     val channelLayout: StateFlow<ChannelLayout> = _channelLayout.asStateFlow()
 
+    /**
+     * How channels from playlists are displayed: [PlaylistMode.ORIGINAL] keeps all channels,
+     * original verbatim names, and categories separate as in the playlist; [PlaylistMode.MERGED]
+     * folds quality variants (HD/SD/FHD) into a single row and cleans names.
+     */
+    enum class PlaylistMode { ORIGINAL, MERGED }
+
+    private val _playlistMode = MutableStateFlow(readPlaylistMode())
+    val playlistMode: StateFlow<PlaylistMode> = _playlistMode.asStateFlow()
+
     /** Whether embedded subtitles/closed captions are shown when a stream carries them. */
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
@@ -108,6 +118,28 @@ class AppSettings private constructor(context: Context) {
         _hiddenUnlocked.value = unlocked
     }
 
+    // ---- Decluttered (switched-off) categories -----------------------------------------------
+
+    /**
+     * Live categories the user switched off entirely, as [categoryKey]s (`sourceId|categoryId` —
+     * a category id is only unique within its source). Unlike the PIN-locked adult list above
+     * there's no unlock: these are categories the user simply never watches, so their channels are
+     * never loaded into the guide, search or favourites. Only the channel managers (TV and web)
+     * still list them, so they can be switched back on.
+     */
+    private val _offCategories =
+        MutableStateFlow(prefs.getStringSet(KEY_OFF_CATS, emptySet())!!.toSet())
+    val offCategories: StateFlow<Set<String>> = _offCategories.asStateFlow()
+
+    /** Switch raw categories ([categoryKey]s) off (hidden = true) or back on. Thread-safe. */
+    @Synchronized
+    fun setCategoriesOff(keys: Collection<String>, off: Boolean) {
+        val next = if (off) _offCategories.value + keys else _offCategories.value - keys.toSet()
+        if (next == _offCategories.value) return
+        prefs.edit().putStringSet(KEY_OFF_CATS, next).apply()
+        _offCategories.value = next
+    }
+
     private fun hashPin(pin: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("opentv-pin::$pin".toByteArray())
@@ -122,6 +154,11 @@ class AppSettings private constructor(context: Context) {
     fun setChannelLayout(layout: ChannelLayout) {
         prefs.edit().putString(KEY_CHANNEL_LAYOUT, layout.name).apply()
         _channelLayout.value = layout
+    }
+
+    fun setPlaylistMode(mode: PlaylistMode) {
+        prefs.edit().putString(KEY_PLAYLIST_MODE, mode.name).apply()
+        _playlistMode.value = mode
     }
 
     fun setSubtitlesEnabled(enabled: Boolean) {
@@ -146,6 +183,24 @@ class AppSettings private constructor(context: Context) {
     fun setResumeLastChannel(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_RESUME_LAST, enabled).apply()
         _resumeLastChannel.value = enabled
+    }
+
+    /** Whether picking a live channel hands it to an external player instead of OpenTV's own. */
+    private val _externalPlayerDefault = MutableStateFlow(prefs.getBoolean(KEY_EXTERNAL_PLAYER, false))
+    val externalPlayerDefault: StateFlow<Boolean> = _externalPlayerDefault.asStateFlow()
+
+    fun setExternalPlayerDefault(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_EXTERNAL_PLAYER, enabled).apply()
+        _externalPlayerDefault.value = enabled
+    }
+
+    /** Whether remote channel up/down keys are reversed (CH+ down, CH- up). */
+    private val _invertChannelKeys = MutableStateFlow(prefs.getBoolean(KEY_INVERT_CHANNELS, false))
+    val invertChannelKeys: StateFlow<Boolean> = _invertChannelKeys.asStateFlow()
+
+    fun setInvertChannelKeys(inverted: Boolean) {
+        prefs.edit().putBoolean(KEY_INVERT_CHANNELS, inverted).apply()
+        _invertChannelKeys.value = inverted
     }
 
     // ---- Recording behaviour -----------------------------------------------------------------
@@ -268,6 +323,10 @@ class AppSettings private constructor(context: Context) {
     private fun readChannelLayout(): ChannelLayout =
         runCatching { ChannelLayout.valueOf(prefs.getString(KEY_CHANNEL_LAYOUT, null) ?: "") }
             .getOrDefault(ChannelLayout.GRID)
+
+    private fun readPlaylistMode(): PlaylistMode =
+        runCatching { PlaylistMode.valueOf(prefs.getString(KEY_PLAYLIST_MODE, null) ?: "") }
+            .getOrDefault(PlaylistMode.ORIGINAL)
 
     // ---- Recording ---------------------------------------------------------------------------
 
@@ -423,13 +482,20 @@ class AppSettings private constructor(context: Context) {
     companion object {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
+        private const val KEY_PLAYLIST_MODE = "playlist_mode"
         private const val KEY_SUBTITLES = "subtitles_enabled"
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
+        private const val KEY_OFF_CATS = "off_categories"
+
+        /** The [offCategories] key for one provider category. */
+        fun categoryKey(sourceId: Long, categoryId: String?): String = "$sourceId|$categoryId"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
+        private const val KEY_EXTERNAL_PLAYER = "external_player_default"
+        private const val KEY_INVERT_CHANNELS = "invert_channel_keys"
         private const val KEY_CONTENT_LIVE = "content_live"
         private const val KEY_CONTENT_MOVIES = "content_movies"
         private const val KEY_CONTENT_SERIES = "content_series"

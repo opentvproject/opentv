@@ -41,6 +41,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,7 +95,8 @@ fun MoviesScreen(
     }
 
     // null = the curated home rows; a category id = that category's full grid.
-    var browseCategory by remember { mutableStateOf<String?>(null) }
+    // Saveable so backing out of a title returns to the category grid, not the home rows.
+    var browseCategory by rememberSaveable { mutableStateOf<String?>(null) }
 
     val hasContent = resume.isNotEmpty() || recommended.isNotEmpty() ||
         recentlyAdded.isNotEmpty() || genreRows.isNotEmpty()
@@ -175,7 +177,8 @@ fun SeriesScreen(
         viewModel.loadHomeFeeds()
     }
 
-    var browseCategory by remember { mutableStateOf<String?>(null) }
+    // Saveable so backing out of a title returns to the category grid, not the home rows.
+    var browseCategory by rememberSaveable { mutableStateOf<String?>(null) }
 
     val hasContent = resume.isNotEmpty() || recentlyAdded.isNotEmpty() || genreRows.isNotEmpty()
 

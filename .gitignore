@@ -1,18 +1,41 @@
-*.iml
+# Gradle / Kotlin
 .gradle/
-local.properties
-.idea/
-.DS_Store
 build/
+.kotlin/
+local.properties
+
+# Android
 captures/
 .externalNativeBuild
 .cxx
 *.apk
 *.aab
+*.hprof
+
+# Signing (never commit release keys or their passwords)
 *.keystore
+*.jks
 !debug.keystore
+keystore.properties
+signing.properties
 
+# IDEs
+*.iml
+.idea/
+.vscode/
+.fleet/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python (tools/)
+__pycache__/
+*.py[cod]
+.venv/
+
+# Misc
+*.log
+.env
 .claude/
-
-# Kotlin compiler transient logs
-.kotlin/

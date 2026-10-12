@@ -221,7 +221,7 @@ fun GuidePreview(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    row.primary.shownName,
+                    row.shownName,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,

@@ -59,11 +59,14 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { AppSettings.get(context) }
     val themeMode by settings.themeMode.collectAsState()
+    val playlistMode by settings.playlistMode.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
+    val externalDefault by settings.externalPlayerDefault.collectAsState()
+    val invertChannelKeys by settings.invertChannelKeys.collectAsState()
     val language by settings.languageTag.collectAsState()
     val liveEnabled by settings.liveEnabled.collectAsState()
     val moviesEnabled by settings.moviesEnabled.collectAsState()
@@ -164,6 +167,25 @@ fun AppSettingsScreen(onBack: () -> Unit) {
 
         SettingsSection(stringResource(R.string.settings_section_guide)) {
             Text(
+                stringResource(R.string.settings_playlist_mode_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            ThemeOption(
+                stringResource(R.string.settings_playlist_mode_original),
+                playlistMode == AppSettings.PlaylistMode.ORIGINAL,
+            ) { settings.setPlaylistMode(AppSettings.PlaylistMode.ORIGINAL) }
+            ThemeOption(
+                stringResource(R.string.settings_playlist_mode_merged),
+                playlistMode == AppSettings.PlaylistMode.MERGED,
+            ) { settings.setPlaylistMode(AppSettings.PlaylistMode.MERGED) }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.settings_playlist_mode_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
                 stringResource(R.string.settings_channel_layout_title),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -204,6 +226,18 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 subtitle = stringResource(R.string.settings_resume_subtitle),
                 checked = resumeLast,
                 onToggle = settings::setResumeLastChannel,
+            )
+            ToggleRow(
+                title = stringResource(R.string.settings_external_player_title),
+                subtitle = stringResource(R.string.settings_external_player_subtitle),
+                checked = externalDefault,
+                onToggle = settings::setExternalPlayerDefault,
+            )
+            ToggleRow(
+                title = stringResource(R.string.settings_invert_channel_keys_title),
+                subtitle = stringResource(R.string.settings_invert_channel_keys_subtitle),
+                checked = invertChannelKeys,
+                onToggle = settings::setInvertChannelKeys,
             )
         }
 

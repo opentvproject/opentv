@@ -47,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,7 +125,9 @@ fun MainScreen(
     // still switched on (or Recordings if none are).
     val homeTab = visibleTabs.first()
 
-    var tab by remember { mutableStateOf(homeTab) }
+    // Saveable: this screen is rebuilt when you come back from the player or a detail page, and a plain
+    // remember dropped you on the home tab instead of the one you left from.
+    var tab by rememberSaveable { mutableStateOf(homeTab) }
 
     // If the selected tab gets hidden (its type toggled off while it's open), drop back to the
     // home tab so the content area never tries to show a tab that's no longer there.
