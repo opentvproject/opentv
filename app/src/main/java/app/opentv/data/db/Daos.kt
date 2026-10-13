@@ -35,11 +35,14 @@ private const val UPSERT_CHUNK = 500
 
 @Dao
 interface SourceDao {
-    @Query("SELECT * FROM sources ORDER BY id")
+    @Query("SELECT * FROM sources ORDER BY sortIndex, id")
     fun observeAll(): Flow<List<Source>>
 
-    @Query("SELECT * FROM sources WHERE enabled = 1 ORDER BY id")
+    @Query("SELECT * FROM sources WHERE enabled = 1 ORDER BY sortIndex, id")
     suspend fun enabled(): List<Source>
+
+    @Query("SELECT * FROM sources ORDER BY sortIndex, id")
+    suspend fun all(): List<Source>
 
     @Query("SELECT * FROM sources WHERE id = :id")
     suspend fun byId(id: Long): Source?
@@ -59,6 +62,12 @@ interface SourceDao {
 
 @Dao
 interface ChannelDao {
+    @Query("SELECT * FROM channels WHERE favourite=1 OR hidden=1 OR sortIndex!=0 OR customName IS NOT NULL OR epgOverrideId IS NOT NULL")
+    suspend fun cloudCurated(): List<Channel>
+
+    @Query("SELECT * FROM channels WHERE streamUrl=:url LIMIT 1")
+    suspend fun byStreamUrl(url: String): Channel?
+
     @Query(
         """
         SELECT * FROM channels
@@ -420,6 +429,9 @@ interface ProgrammeDao {
 
 @Dao
 interface MovieDao {
+    @Query("SELECT * FROM movies WHERE favourite=1")
+    suspend fun cloudFavourites(): List<Movie>
+
     @Query(
         """
         SELECT * FROM movies
@@ -520,6 +532,12 @@ interface MovieDao {
 
 @Dao
 interface SeriesDao {
+    @Query("SELECT * FROM series WHERE favourite=1")
+    suspend fun cloudFavourites(): List<Series>
+
+    @Query("SELECT * FROM series WHERE sourceId=:sourceId AND seriesId=:seriesId LIMIT 1")
+    suspend fun cloudByProvider(sourceId: Long, seriesId: String): Series?
+
     @Query(
         """
         SELECT * FROM series

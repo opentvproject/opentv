@@ -37,15 +37,21 @@ object ServiceLocator {
             instance ?: Graph(context.applicationContext).also { instance = it }
         }
 
-    class Graph(context: Context) {
+    class Graph(
+        context: Context,
+        private val databaseOverride: OpenTvDatabase? = null,
+        private val httpOverride: OkHttpClient? = null,
+    ) {
         private val appContext = context.applicationContext
+
+        val cloudSync by lazy { app.opentv.sync.cloud.CloudSync(appContext, this) }
 
         val settings: AppSettings by lazy { AppSettings.get(appContext) }
 
-        val database: OpenTvDatabase by lazy { OpenTvDatabase.build(context) }
+        val database: OpenTvDatabase by lazy { databaseOverride ?: OpenTvDatabase.build(context) }
 
         val httpClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
+            httpOverride ?: OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 // Generous: catalogue endpoints on a busy panel can take a long time to
                 // produce 40,000 rows, and timing out mid-list is worse than waiting.

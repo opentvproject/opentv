@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="opentv_cloud_vault.xml" />
+        <exclude domain="sharedpref" path="opentv_cloud.xml" />
+        <exclude domain="database" path="opentv-cloud.db" />
+        <exclude domain="database" path="opentv-cloud.db-wal" />
+        <exclude domain="database" path="opentv-cloud.db-shm" />
+        <exclude domain="database" path="opentv-cloud.db-journal" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="opentv_cloud_vault.xml" />
+        <exclude domain="sharedpref" path="opentv_cloud.xml" />
+        <exclude domain="database" path="opentv-cloud.db" />
+        <exclude domain="database" path="opentv-cloud.db-wal" />
+        <exclude domain="database" path="opentv-cloud.db-shm" />
+        <exclude domain="database" path="opentv-cloud.db-journal" />
+    </device-transfer>
+</data-extraction-rules>

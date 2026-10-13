@@ -73,6 +73,7 @@ import app.opentv.ui.settings.ProfilesScreen
 import app.opentv.ui.settings.ProvidersScreen
 import app.opentv.ui.settings.StremioAddonsScreen
 import app.opentv.ui.settings.RecordingSettingsScreen
+import app.opentv.ui.settings.CloudSyncScreen
 import app.opentv.ui.settings.SyncScreen
 import app.opentv.ui.settings.SettingsHubScreen
 import app.opentv.ui.settings.WebManagerScreen
@@ -89,6 +90,16 @@ class MainActivity : ComponentActivity() {
     // settings calls recreate(), which re-runs this with the new tag.
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(app.opentv.core.LocaleUtils.wrap(newBase))
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ServiceLocator.get(this).cloudSync.setForeground(true)
+    }
+
+    override fun onStop() {
+        ServiceLocator.get(this).cloudSync.setForeground(false)
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -197,6 +208,7 @@ object Routes {
     const val PROFILES = "profiles"
     const val PARENTAL = "parental"
     const val SYNC = "sync"
+    const val CLOUD_SYNC = "cloud-sync"
     const val REC_SETTINGS = "recording-settings"
     const val ABOUT = "about"
     const val SERIES_DETAIL = "series/{seriesId}"
@@ -413,10 +425,15 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     onOpenDisplay = { navController.navigate(Routes.APP_SETTINGS) },
                     onOpenParental = { navController.navigate(Routes.PARENTAL) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },
+                    onOpenCloudSync = { navController.navigate(Routes.CLOUD_SYNC) },
                     onOpenRecordings = { navController.navigate(Routes.REC_SETTINGS) },
                     onOpenAbout = { navController.navigate(Routes.ABOUT) },
                     onBack = { navController.popBackStack() },
                 )
+            }
+
+            composable(Routes.CLOUD_SYNC) {
+                CloudSyncScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.SYNC) {

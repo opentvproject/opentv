@@ -162,3 +162,11 @@ of work the community did for free.
 OpenTV is a media player, comparable to VLC. It ships with no channels, no playlists, and no
 links to any. What you point it at, and whether you are entitled to, is between you and your
 provider.
+
+### Optional Supabase cloud sync
+
+Settings → Cloud Sync can synchronize authorized M3U/M3U8 playlists, Xtream providers,
+favorites, hidden items, per-profile resume positions, profiles, and selected preferences
+through your own Supabase backend. Content is encrypted on-device; no account is needed
+for local use. LAN and NAS sync remain available. See [setup, pairing, recovery, security,
+and limitations](docs/CLOUD_SYNC.md) before enabling it.

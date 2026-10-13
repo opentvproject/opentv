@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">OpenTV</string>
 
     <!-- ============================ Common / reused ============================ -->
@@ -503,4 +503,43 @@
     <string name="settings_tmdb_save">Save key</string>
     <string name="settings_tmdb_saved">TMDB key saved</string>
     <string name="settings_tmdb_active">Active</string>
+    <string tools:ignore="MissingTranslation" name="cloud_title">Cloud Sync</string>
+    <string tools:ignore="MissingTranslation" name="cloud_subtitle">Optional encrypted sync with your Supabase backend</string>
+    <string tools:ignore="MissingTranslation" name="cloud_description">Keep your authorized providers and user preferences on your devices. Local use requires no account. LAN and NAS sync remain available.</string>
+    <string tools:ignore="MissingTranslation" name="cloud_last_sync">Last successful sync: %1$s</string>
+    <string tools:ignore="MissingTranslation" name="cloud_enable">Enable cloud sync</string>
+    <string tools:ignore="MissingTranslation" name="cloud_disable">Disable cloud sync</string>
+    <string tools:ignore="MissingTranslation" name="cloud_url">Supabase project URL (HTTPS)</string>
+    <string tools:ignore="MissingTranslation" name="cloud_publishable">Project publishable key (sb_publishable_)</string>
+    <string tools:ignore="MissingTranslation" name="cloud_nickname">Device nickname</string>
+    <string tools:ignore="MissingTranslation" name="cloud_email">Email</string>
+    <string tools:ignore="MissingTranslation" name="cloud_password">Password</string>
+    <string tools:ignore="MissingTranslation" name="cloud_sign_in">Sign in</string>
+    <string tools:ignore="MissingTranslation" name="cloud_create_account">Create account</string>
+    <string tools:ignore="MissingTranslation" name="cloud_save_nickname">Save nickname</string>
+    <string tools:ignore="MissingTranslation" name="cloud_sync_now">Sync now</string>
+    <string tools:ignore="MissingTranslation" name="cloud_devices">Connected devices</string>
+    <string tools:ignore="MissingTranslation" name="cloud_unlink">Remove linked device</string>
+    <string tools:ignore="MissingTranslation" name="cloud_categories">Choose what to synchronize</string>
+    <string tools:ignore="MissingTranslation" name="cloud_providers">Xtream providers</string>
+    <string tools:ignore="MissingTranslation" name="cloud_playlists">M3U / M3U8 playlists</string>
+    <string tools:ignore="MissingTranslation" name="cloud_favorites">Favorites and hidden items</string>
+    <string tools:ignore="MissingTranslation" name="cloud_watch">Watch history and resume positions</string>
+    <string tools:ignore="MissingTranslation" name="cloud_profiles">Profiles</string>
+    <string tools:ignore="MissingTranslation" name="cloud_settings">Playback, display, channel and EPG settings</string>
+    <string tools:ignore="MissingTranslation" name="cloud_recovery">Recovery key</string>
+    <string tools:ignore="MissingTranslation" name="cloud_recover">Recover encryption key</string>
+    <string tools:ignore="MissingTranslation" name="cloud_recovery_warning">Save your recovery key privately. It can decrypt your provider credentials. Losing every paired device and the recovery key makes encrypted cloud data unrecoverable.</string>
+    <string tools:ignore="MissingTranslation" name="cloud_show_recovery">Show / hide recovery key</string>
+    <string tools:ignore="MissingTranslation" name="cloud_request_pair">Pair this device with an existing device</string>
+    <string tools:ignore="MissingTranslation" name="cloud_pair_code">Code shown on the new device</string>
+    <string tools:ignore="MissingTranslation" name="cloud_approve_pair">Approve another device</string>
+    <string tools:ignore="MissingTranslation" name="cloud_code_expires">Pairing code: %1$s (expires in 10 minutes)</string>
+    <string tools:ignore="MissingTranslation" name="cloud_compare">Compare this code on BOTH screens: %1$s. Only continue if the codes match.</string>
+    <string tools:ignore="MissingTranslation" name="cloud_confirm_pair">The codes match — finish pairing</string>
+    <string tools:ignore="MissingTranslation" name="cloud_sign_out">Sign out and unlink this device</string>
+    <string tools:ignore="MissingTranslation" name="cloud_error">Could not complete this action. Check the HTTPS project URL, publishable key, login, and recovery or pairing code. Try again; local data is safe.</string>
+    <string tools:ignore="MissingTranslation" name="cloud_reauth">Sign in again</string>
+    <string tools:ignore="MissingTranslation" name="cloud_reauth_help">If your session expired or this device was removed, disable sync and sign in again. Your saved encryption key stays available for this account.</string>
+    <string tools:ignore="MissingTranslation" name="cloud_pair_qr">Pairing lookup code only. Scan to copy the code to your signed-in device.</string>
 </resources>

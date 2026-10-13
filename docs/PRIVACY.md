@@ -12,11 +12,16 @@ Everything lives in a SQLite database in the app's private storage on your devic
 - The guide (EPG)
 - Your favourites, hidden channels and resume positions
 
-None of it is uploaded anywhere. There is no account to create and no server to sync with.
+Local-only use uploads none of this state. Optional LAN/NAS synchronization uses the peer or
+share you configure. If you explicitly enable Supabase Cloud Sync, encrypted user content
+and device metadata are sent to your configured Supabase backend. Supabase Auth stores the
+account email and manages login sessions. The backend never receives the account encryption
+key or plaintext provider payloads. See [cloud sync security and recovery](CLOUD_SYNC.md).
 
 ## Who your device talks to
 
-Only your provider, and only at the address you entered. Channel logos and posters are fetched
+Your provider at the address you entered, configured guide/add-on services, and any sync peers
+or Supabase project you opt into. Channel logos and posters are fetched
 from whatever URLs your provider puts in its catalogue, which are usually its own servers but
 may be third parties — that is your provider's choice, not ours.
 
@@ -32,7 +37,10 @@ offers an HTTPS endpoint, use it.
 
 ## Uninstalling
 
-Removing the app removes the database and everything in it.
+Removing the app removes local databases, cloud sessions, and locally wrapped key material.
+It does not delete encrypted records in a configured Supabase account. Recover those with
+a saved recovery key or another authorized device. Delete the backend account/data in your
+Supabase project when you want to remove that remote copy.
 
 ## Reporting a privacy problem
 
