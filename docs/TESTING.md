@@ -37,3 +37,16 @@ Open a GitHub issue with: device + Android version, what you did (checklist lett
 enough), what happened, and the relevant chunk of `testrun.log`. **Strip your provider's
 URL/username/password first** — logs deliberately never print credentials, but check what
 you paste anyway.
+
+## Playback buffer
+
+In Settings → Display & playback → Playback, choose each buffer preset using the TV remote.
+The selected row should update immediately and survive an app restart. Leave settings and
+open a live channel, movie, episode, or completed recording to use the new preset. Compare
+startup and recovery after a brief network interruption; the displayed durations are buffer
+targets, so a provider's live window or the player's allocation limit can keep them smaller.
+
+Return to Default to restore the original 15–60 second forward-buffer targets and 2.5/5 second
+startup/rebuffer thresholds. Check fast channel switching and VOD resume/seek with Small and
+Extra large. Guide preview, live pause/DVR, and recordings still being written must keep their
+existing tuning for every selection. Buffer tuning is saved on this device only.

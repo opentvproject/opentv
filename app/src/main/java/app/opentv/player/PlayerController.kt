@@ -6,6 +6,8 @@
 package app.opentv.player
 
 import android.content.Context
+import app.opentv.core.AppSettings
+import app.opentv.core.BufferPreset
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -84,7 +86,13 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
+    /** Read once per playback session so changing a preference never tears down an active player. */
+    bufferPreset: BufferPreset = AppSettings.get(context).bufferPreset.value,
 ) {
+
+    // Preview, DVR and growing recordings rely on their original timing and memory budgets.
+    private val playbackBuffer =
+        if (preview || dvr || liveRecording) BufferPreset.DEFAULT else bufferPreset
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
     private val switchDebounceMillis = if (preview) PREVIEW_SWITCH_DEBOUNCE_MILLIS else SWITCH_DEBOUNCE_MILLIS
@@ -190,22 +198,22 @@ class PlayerController(
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    if (preview) PREVIEW_MIN_BUFFER_MILLIS else MIN_BUFFER_MILLIS,
+                    if (preview) PREVIEW_MIN_BUFFER_MILLIS else playbackBuffer.minBufferMillis,
                     when {
                         preview -> PREVIEW_MAX_BUFFER_MILLIS
                         dvr -> DVR_MAX_BUFFER_MILLIS
                         liveRecording -> LIVE_REC_MAX_BUFFER_MILLIS
-                        else -> MAX_BUFFER_MILLIS
+                        else -> playbackBuffer.maxBufferMillis
                     },
                     when {
                         preview -> PREVIEW_BUFFER_FOR_PLAYBACK_MILLIS
                         liveRecording -> LIVE_REC_BUFFER_FOR_PLAYBACK_MILLIS
-                        else -> BUFFER_FOR_PLAYBACK_MILLIS
+                        else -> playbackBuffer.playbackBufferMillis
                     },
                     when {
                         preview -> PREVIEW_BUFFER_AFTER_REBUFFER_MILLIS
                         liveRecording -> LIVE_REC_BUFFER_AFTER_REBUFFER_MILLIS
-                        else -> BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MILLIS
+                        else -> playbackBuffer.rebufferMillis
                     },
                 )
                 // Retain the last few minutes so pause/rewind of live TV has something to seek into.
@@ -385,15 +393,6 @@ class PlayerController(
         const val MAX_LOAD_RETRIES = 5
         const val MAX_AUTO_RESTARTS = 3
         const val AUTO_RESTART_DELAY_MILLIS = 1_500L
-
-        /**
-         * Larger than ExoPlayer's defaults. IPTV sources are much twitchier than a CDN, and a
-         * deeper buffer is the difference between a momentary hiccup and a visible stall.
-         */
-        const val MIN_BUFFER_MILLIS = 15_000
-        const val MAX_BUFFER_MILLIS = 60_000
-        const val BUFFER_FOR_PLAYBACK_MILLIS = 2_500
-        const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MILLIS = 5_000
 
         // DVR mode (pause & rewind live TV): keep a couple of minutes behind the live edge to seek
         // into, and let the forward buffer grow to match so a pause of up to a couple of minutes

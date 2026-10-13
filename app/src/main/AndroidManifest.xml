@@ -54,6 +54,8 @@
     <application
         android:name=".OpenTvApp"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/cloud_backup_rules"
+        android:dataExtractionRules="@xml/cloud_data_extraction_rules"
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

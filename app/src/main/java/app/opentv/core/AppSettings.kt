@@ -44,6 +44,15 @@ class AppSettings private constructor(context: Context) {
     private val _channelLayout = MutableStateFlow(readChannelLayout())
     val channelLayout: StateFlow<ChannelLayout> = _channelLayout.asStateFlow()
 
+    /** On-device playback tuning; different TV boxes have different memory budgets. */
+    private val _bufferPreset = MutableStateFlow(savedBufferPreset(context))
+    val bufferPreset: StateFlow<BufferPreset> = _bufferPreset.asStateFlow()
+
+    fun setBufferPreset(preset: BufferPreset) {
+        prefs.edit().putString(KEY_BUFFER_PRESET, preset.name).apply()
+        _bufferPreset.value = preset
+    }
+
     /** Whether embedded subtitles/closed captions are shown when a stream carries them. */
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
@@ -424,6 +433,17 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
         private const val KEY_SUBTITLES = "subtitles_enabled"
+        private const val KEY_BUFFER_PRESET = "buffer_preset"
+
+        /** Read independently of the singleton, including on the first launch after an upgrade. */
+        fun savedBufferPreset(context: Context): BufferPreset =
+            runCatching {
+                BufferPreset.fromStoredValue(
+                    context.applicationContext
+                        .getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+                        .getString(KEY_BUFFER_PRESET, null),
+                )
+            }.getOrDefault(BufferPreset.DEFAULT)
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"

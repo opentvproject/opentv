@@ -45,8 +45,8 @@ enum class LiveStreamFormat(val extension: String) {
 }
 
 /**
- * A configured provider. Everything lives on-device; there is no OpenTV account
- * and no OpenTV server. See docs/ARCHITECTURE.md for why.
+ * A configured provider. Local use needs no account or OpenTV server. Optional cloud
+ * copies are encrypted on-device; see docs/CLOUD_SYNC.md.
  */
 @Entity(tableName = "sources")
 data class Source(
@@ -77,6 +77,7 @@ data class Source(
     val liveFormat: LiveStreamFormat = LiveStreamFormat.HLS,
     val enabled: Boolean = true,
     val lastCatalogSyncMillis: Long = 0,
+    @ColumnInfo(defaultValue = "0") val sortIndex: Int = 0,
 ) {
     companion object {
         const val DEFAULT_USER_AGENT: String = "OpenTV/0.1 (Android)"

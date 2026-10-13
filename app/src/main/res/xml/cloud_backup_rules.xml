@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="opentv_cloud_vault.xml" />
+    <exclude domain="sharedpref" path="opentv_cloud.xml" />
+    <exclude domain="database" path="opentv-cloud.db" />
+    <exclude domain="database" path="opentv-cloud.db-wal" />
+    <exclude domain="database" path="opentv-cloud.db-shm" />
+    <exclude domain="database" path="opentv-cloud.db-journal" />
+</full-backup-content>

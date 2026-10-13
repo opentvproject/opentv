@@ -67,6 +67,7 @@ fun SettingsHubScreen(
     onOpenDisplay: () -> Unit,
     onOpenParental: () -> Unit,
     onOpenSync: () -> Unit,
+    onOpenCloudSync: () -> Unit,
     onOpenRecordings: () -> Unit,
     onOpenAbout: () -> Unit,
     onBack: () -> Unit,
@@ -80,6 +81,7 @@ fun SettingsHubScreen(
         HubEntry(Icons.Filled.Tune, stringResource(R.string.settings_display_title), stringResource(R.string.settings_display_subtitle), onOpenDisplay),
         HubEntry(Icons.Filled.Storage, stringResource(R.string.settings_recording_title), stringResource(R.string.settings_recording_subtitle), onOpenRecordings),
         HubEntry(Icons.Filled.Lock, stringResource(R.string.settings_parental_title), stringResource(R.string.settings_parental_subtitle), onOpenParental),
+        HubEntry(Icons.Filled.Sync, stringResource(R.string.cloud_title), stringResource(R.string.cloud_subtitle), onOpenCloudSync),
         HubEntry(Icons.Filled.Sync, stringResource(R.string.settings_sync_title), stringResource(R.string.settings_sync_subtitle), onOpenSync),
         HubEntry(Icons.Filled.Info, stringResource(R.string.settings_about_title), stringResource(R.string.settings_about_subtitle), onOpenAbout),
     )

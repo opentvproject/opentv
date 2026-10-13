@@ -45,6 +45,7 @@ import android.content.Context
 import android.widget.Toast
 import app.opentv.R
 import app.opentv.core.AppSettings
+import app.opentv.core.BufferPreset
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.data.work.SyncWorker
@@ -52,7 +53,7 @@ import app.opentv.data.work.SyncWorker
 /**
  * Display & playback preferences: the app-behaviour settings, kept apart from the guide/data
  * settings so neither screen becomes a junk drawer. Everything here writes straight to
- * [AppSettings] and takes effect immediately.
+ * [AppSettings]. Buffer tuning takes effect the next time a playback session is opened.
  */
 @Composable
 fun AppSettingsScreen(onBack: () -> Unit) {
@@ -63,6 +64,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
+    val bufferPreset by settings.bufferPreset.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
     val language by settings.languageTag.collectAsState()
     val liveEnabled by settings.liveEnabled.collectAsState()
@@ -193,6 +195,40 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         SettingsSection(stringResource(R.string.settings_section_playback)) {
+            Text(
+                stringResource(R.string.settings_buffer_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            BufferPreset.entries.forEach { preset ->
+                val label = when (preset) {
+                    BufferPreset.DEFAULT -> R.string.settings_buffer_default
+                    BufferPreset.SMALL -> R.string.settings_buffer_small
+                    BufferPreset.MEDIUM -> R.string.settings_buffer_medium
+                    BufferPreset.LARGE -> R.string.settings_buffer_large
+                    BufferPreset.EXTRA_LARGE -> R.string.settings_buffer_extra_large
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = bufferPreset == preset,
+                            role = androidx.compose.ui.semantics.Role.RadioButton,
+                            onClick = { settings.setBufferPreset(preset) },
+                        )
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = bufferPreset == preset, onClick = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(label), style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Text(
+                stringResource(R.string.settings_buffer_note),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
             ToggleRow(
                 title = stringResource(R.string.settings_subtitles_title),
                 subtitle = stringResource(R.string.settings_subtitles_subtitle),
