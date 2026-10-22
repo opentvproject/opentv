@@ -62,10 +62,46 @@ synthetic data — and those are where most of the interesting bugs are.
   merge logic all are.
 - Run `./gradlew test` before pushing.
 - Explain the *why* in the description. The code says what it does.
+- **New files carry the licence header.** Every source file starts with:
+
+  ```kotlin
+  /*
+   * This file is part of OpenTV.
+   * Copyright (C) 2026 The OpenTV Contributors
+   * Licensed under the GNU General Public License v3.0 or later.
+   */
+  ```
+
+  Do not remove it from the files you touch. GPL §5(b) asks the notices to be kept, and the
+  header is how the copyright holder is recorded.
 
 Comments should explain reasoning, not restate the line below them. Look at
 `EpgRepository` or `PlayerController` for the house style: the interesting comments are the ones
 explaining why an obvious implementation was rejected.
+
+## The licence
+
+OpenTV is **GPL-3.0-or-later** ([LICENSE](LICENSE)), and this repository is a fork of
+[upstream](https://github.com/opentvproject/opentv) — see [NOTICE](NOTICE). What that means for
+a contribution:
+
+- **Your contribution is licensed GPL-3.0-or-later**, the same as everything around it. That is
+  what makes it possible for the project to be forked, changed and shipped by anyone.
+- **The licence cannot be made more restrictive.** Not in a file, not in a PR template, not in a
+  build script. GPL §10 forbids additional restrictions on the source.
+- **Nothing copyleft and nothing proprietary goes in.** A dependency under a copyleft licence
+  (GPL, AGPL, LGPL) or a snippet from a closed-source app changes the terms of the whole
+  project — and the second one ends it. Apache-2.0, MIT and BSD are all fine; the dependency
+  list is in `gradle/libs.versions.toml` and the licensing in `NOTICE`.
+- **If you fork it, keep the notices.** The copyright headers stay, `LICENSE` stays, and if you
+  publish builds, the source of *those* builds has to be reachable from them. The About screen's
+  "Source code" link is not decoration: it is the GPL §6(b) offer of the corresponding source.
+- **Forking is not a betrayal.** The licence guarantees it, permanently. Upstream's own view is
+  in the last paragraph of this file.
+
+One thing that is *not* a licence matter, and is easy to get wrong: the app name and logo are
+upstream's. The GPL lets you copy and change the code; it does not let you imply the upstream
+endorses your fork.
 
 ## Good first issues
 

@@ -135,7 +135,12 @@ fun GuidePreview(
                             )
                         }
                     },
-                    update = { it.player = previewPlayer },
+                    // Only when the player actually changes. This block runs on every
+                    // recomposition of the preview — which is every time the highlight moves
+                    // down a channel — and handing PlayerView the same player again makes it
+                    // re-attach: the surface is torn down and the decoder restarts, which is
+                    // a visible stall on a cheap box and the reason the guide felt slow.
+                    update = { view -> if (view.player !== previewPlayer) view.player = previewPlayer },
                 )
             }
 

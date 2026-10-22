@@ -54,6 +54,12 @@ class Converters {
         runCatching { RecordingStatus.valueOf(value) }.getOrDefault(RecordingStatus.FAILED)
 }
 
+/**
+ * The schema version, in one place: the annotation below uses it, and the migration tests
+ * migrate *to* it, so a version bump that forgets the tests cannot pass quietly.
+ */
+const val DATABASE_VERSION = 13
+
 @Database(
     entities = [
         Source::class,
@@ -71,7 +77,7 @@ class Converters {
         SeriesRule::class,
         Reminder::class,
     ],
-    version = 11,
+    version = DATABASE_VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -98,7 +104,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * default profile's, so nobody loses their place. Written to match Room's own DDL so the
          * identity check passes; the destructive fallback below is only a backstop.
          */
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `profiles` (" +
@@ -129,7 +135,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * the schema-identity check passes and favourites/overrides survive the upgrade (rather
          * than falling through to the destructive rebuild below).
          */
-        private val MIGRATION_3_4 = object : Migration(3, 4) {
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `recordings` (" +
@@ -172,7 +178,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * v4 → v5: catch-up. Adds the archive columns to channels. Additive; the DEFAULT 0 matches
          * the entity's @ColumnInfo(defaultValue = "0") so the schema-identity check passes.
          */
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `channels` ADD COLUMN `tvArchive` INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE `channels` ADD COLUMN `tvArchiveDays` INTEGER NOT NULL DEFAULT 0")
@@ -184,7 +190,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * indices, matching Room's generated DDL so favourites, recordings and overrides survive
          * the upgrade rather than falling through to the destructive rebuild.
          */
-        private val MIGRATION_5_6 = object : Migration(5, 6) {
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `reminders` (" +
@@ -211,7 +217,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * the other enum-as-String columns (`kind`) — so the DB-only default is not part of the
          * schema-identity check and the upgrade preserves favourites and overrides.
          */
-        private val MIGRATION_6_7 = object : Migration(6, 7) {
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `sources` ADD COLUMN `liveFormat` TEXT NOT NULL DEFAULT 'HLS'")
             }
@@ -223,7 +229,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * and nullable (no NOT NULL, no default) to match the nullable Kotlin `String?`, so the
          * schema-identity check passes and favourites/overrides survive the upgrade.
          */
-        private val MIGRATION_7_8 = object : Migration(7, 8) {
+        internal val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `channels` ADD COLUMN `customName` TEXT")
             }
@@ -237,7 +243,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * check passes and favourites/overrides survive the upgrade rather than falling through to
          * the destructive rebuild.
          */
-        private val MIGRATION_8_9 = object : Migration(8, 9) {
+        internal val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `movies` ADD COLUMN `backdropUrl` TEXT")
                 db.execSQL("ALTER TABLE `movies` ADD COLUMN `cast` TEXT")
@@ -253,7 +259,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
 
         /** Recordings gain a profile owner so a booking can be tagged to whoever set it. Nullable
          *  (no default) to match Room's generated DDL for a `Long?` field — the project's pattern. */
-        private val MIGRATION_9_10 = object : Migration(9, 10) {
+        internal val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `recordings` ADD COLUMN `profileId` INTEGER")
             }
@@ -265,10 +271,36 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * at tune time). Both nullable TEXT with no default, matching the `String?` fields, so the
          * schema-identity check passes and favourites/overrides survive the upgrade.
          */
-        private val MIGRATION_10_11 = object : Migration(10, 11) {
+        internal val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `sources` ADD COLUMN `macAddress` TEXT")
                 db.execSQL("ALTER TABLE `channels` ADD COLUMN `cmd` TEXT")
+            }
+        }
+
+        /**
+         * v11 → v12: catch-up for M3U playlists. Adds the where-to-get-it columns to channels.
+         * Additive and nullable (or with the entity's own DEFAULT 0), so a playlist's channels keep
+         * their favourites and guide overrides through the upgrade.
+         */
+        internal val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `channels` ADD COLUMN `catchupSource` TEXT")
+                db.execSQL("ALTER TABLE `channels` ADD COLUMN `catchupMode` TEXT")
+                db.execSQL("ALTER TABLE `channels` ADD COLUMN `catchupCorrectionSecs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * v12 → v13: the provider's timezone on sources. A catch-up URL has to name the start
+         * time on the provider's clock, not the device's, and the panel's own zone is the only
+         * place that is written down. Nullable TEXT with no default, matching the `String?`
+         * field, so an existing provider keeps working on the device's zone until the panel
+         * tells us better.
+         */
+        internal val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sources` ADD COLUMN `timezone` TEXT")
             }
         }
 
@@ -279,7 +311,8 @@ abstract class OpenTvDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+                    MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
+                    MIGRATION_12_13,
                 )
                 /*
                  * Pre-1.0 policy: schema changes drop and rebuild the database. Everything

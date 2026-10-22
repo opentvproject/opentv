@@ -111,6 +111,7 @@ object ServiceLocator {
                 sourceDao = database.sources(),
                 api = xtreamApi,
                 http = httpClient,
+                settings = settings,
             )
         }
 

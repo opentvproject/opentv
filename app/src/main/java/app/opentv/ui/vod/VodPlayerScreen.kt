@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -78,6 +79,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -85,13 +87,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.Tracks
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.player.PlayerController
+import app.opentv.ui.formatDuration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -159,21 +165,27 @@ fun VodPlayerScreen(
 
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // Bumped to start the film again after the screen was taken away and came back.
+    var restartToken by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val barFocus = remember { FocusRequester() }
     val rootFocus = remember { FocusRequester() }
 
     fun reveal() { controlsVisible = true; interaction++ }
 
-    suspend fun savePosition() {
-        val player = controller.player
-        val pos = player.currentPosition
-        val dur = player.duration.takeIf { it > 0 } ?: return
-        if (pos > 5_000) {
+    /**
+     * Saves the position that was reached, as given.
+     *
+     * Stopping the player resets its position to zero, so anything that wants to remember
+     * where the film was has to read the position *before* the stop and hand it over.
+     */
+    suspend fun savePositionAt(positionMillis: Long, durationMillis: Long) {
+        val dur = durationMillis.takeIf { it > 0 } ?: return
+        if (positionMillis > 5_000) {
             graph.playbackPositions.upsert(
                 app.opentv.data.model.PlaybackPosition(
                     profileId = settings.activeProfileId.value,
                     mediaKey = mediaKey,
-                    positionMillis = pos,
+                    positionMillis = positionMillis,
                     durationMillis = dur,
                     updatedAtMillis = System.currentTimeMillis(),
                 ),
@@ -181,22 +193,37 @@ fun VodPlayerScreen(
         }
     }
 
+    suspend fun savePosition() {
+        val player = controller.player
+        savePositionAt(player.currentPosition, player.duration)
+    }
+
     // Keep the screen awake during playback — see the note in PlayerScreen; a film is exactly when
     // the screensaver must not fire. Window flag is the reliable path; keepScreenOn is a backstop.
+    //
+    // On a television it is the other way round: the set's own screensaver is the ambience, and
+    // the film stops with the picture rather than talking to an empty room. Stopping it for
+    // good is the transport bar's "Turn off" button.
+    val appMode by settings.appMode.collectAsState()
+    val isTelevision = appMode == AppSettings.AppMode.TV
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        view.keepScreenOn = true
+        if (!isTelevision) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            view.keepScreenOn = true
+        }
         onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            view.keepScreenOn = false
+            if (!isTelevision) {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                view.keepScreenOn = false
+            }
             scope.launch { savePosition() }
             controller.release()
             scope.cancel()
         }
     }
 
-    LaunchedEffect(mediaKey) {
+    LaunchedEffect(mediaKey, restartToken) {
         val resumeFrom = graph.playbackPositions.get(settings.activeProfileId.value, mediaKey)
             ?.takeIf { !it.isFinished }?.positionMillis ?: 0L
         controller.play(
@@ -213,6 +240,37 @@ fun VodPlayerScreen(
             delay(15_000)
             savePosition()
         }
+    }
+
+    // On a television, the box takes the screen away when the set is left alone — that is the
+    // screensaver, and it is the television going dark. A television that keeps talking to an
+    // empty room is not a television, so the film stops with the picture, and starts again
+    // where it was when the viewer comes back.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var stoppedWithTheScreen by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner, isTelevision) {
+        val observer = LifecycleEventObserver { _, event ->
+            when {
+                !isTelevision -> Unit
+                event == Lifecycle.Event.ON_STOP -> {
+                    // Read where the film was before the stop — stopping resets the
+                    // position to zero, so the save has to come first.
+                    val position = controller.player.currentPosition
+                    val duration = controller.player.duration
+                    scope.launch { savePositionAt(position, duration) }
+                    controller.stop()
+                    stoppedWithTheScreen = true
+                }
+                event == Lifecycle.Event.ON_START && stoppedWithTheScreen -> {
+                    stoppedWithTheScreen = false
+                    // Wake up with the film still on, where it was left.
+                    restartToken++
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Sleep timer: leave the film when the armed deadline passes (position is saved on dispose).
@@ -406,14 +464,17 @@ fun VodPlayerScreen(
                 Spacer(Modifier.height(10.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    VodChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind)) {
+                    VodChip(
+                        icon = Icons.Filled.FastRewind,
+                        label = stringResource(R.string.player_rewind),
+                        focusRequester = barFocus,
+                    ) {
                         if (growingRec) seekRelative(-15_000) else controller.seekBackward(); interaction++
                     }
                     Spacer(Modifier.width(10.dp))
                     VodChip(
                         icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                         label = if (paused) stringResource(R.string.common_play) else stringResource(R.string.player_pause),
-                        focusRequester = barFocus,
                     ) {
                         paused = !paused
                         controller.player.playWhenReady = !paused
@@ -432,6 +493,19 @@ fun VodPlayerScreen(
                     VodChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio)) {
                         vodPanel = if (vodPanel == VodPanel.AUDIO) VodPanel.NONE else VodPanel.AUDIO
                         interaction++
+                    }
+                    // The television's power button, from inside the app: the stream stops,
+                    // the app gets out of the way, and the box is left idle. The screen-off
+                    // the system does on its own stops the film too, and picks it up where
+                    // it was when the viewer comes back.
+                    if (isTelevision) {
+                        Spacer(Modifier.width(10.dp))
+                        VodChip(Icons.Filled.PowerSettingsNew, stringResource(R.string.player_turn_off)) {
+                            // Stop the stream before the window goes, so the audio does not
+                            // outlive the app by even a moment.
+                            controller.stop()
+                            context.findActivity()?.finish()
+                        }
                     }
                 }
             }
@@ -455,11 +529,25 @@ private fun VodChip(
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(12.dp))
             .background(container)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                else Modifier,
+            // The border is always in the chain, transparent when the chip is not focused.
+            // Adding and removing a modifier changes the chain, and a chain that changes
+            // under a focus target can take the focus with it — and the chip becomes a
+            // picture the arrows walk straight past.
+            .border(
+                2.dp,
+                if (focused) MaterialTheme.colorScheme.primary else Color.Transparent,
+                RoundedCornerShape(12.dp),
             )
             .clickable(onClick = onClick)
+            // Focusable, or the chip is a picture on a television: the d-pad walked past every
+            // button, and the only way to "press" one was to press OK on whatever had the
+            // focus — which was play/pause.
+            //
+            // It goes after the clickable on purpose: Compose finds the key handler of a
+            // focused element by walking the modifier chain and stopping at the first focus
+            // target, so a focusable() in front of the clickable hides it and the OK button
+            // stops doing anything.
+            .focusable()
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -534,7 +622,9 @@ private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, focu
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
+            // Focusable, or the picker is a dead end on a remote: OK has nothing to press.
             .clickable(onClick = onClick)
+            .focusable()
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -551,11 +641,3 @@ private fun vodTrackLabel(label: String?, language: String?, index: Int): String
     return "Track ${index + 1}"
 }
 
-private fun formatDuration(ms: Long): String {
-    if (ms <= 0) return "0:00"
-    val totalSec = ms / 1000
-    val h = totalSec / 3600
-    val m = (totalSec % 3600) / 60
-    val s = totalSec % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-}

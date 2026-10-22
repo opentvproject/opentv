@@ -36,11 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.data.model.Source
 import app.opentv.pairing.PairingServer
 import app.opentv.pairing.QrCodes
@@ -136,6 +138,18 @@ private fun Listening(session: PairingServer.Session, onCancel: () -> Unit) {
         }
 
         Column(Modifier.widthIn(max = 520.dp)) {
+            // The mode, asked here as well: on a television this is the first screen of the
+            // app, and it is the moment to say whether this is a television or a phone. Picking
+            // "phone" here drops straight to the direct form; picking "TV" stays here.
+            val context = LocalContext.current
+            val settings = remember { AppSettings.get(context) }
+            val appMode by settings.appMode.collectAsState()
+            ModeSelector(
+                mode = appMode,
+                onSelect = { settings.setAppMode(it) },
+            )
+
+            Spacer(Modifier.height(20.dp))
             Text(stringResource(R.string.pairing_setup_title), style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(12.dp))
             Text(

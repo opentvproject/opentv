@@ -1,0 +1,79 @@
+# NOTICE
+
+OpenTV
+Copyright (C) 2026 The OpenTV Contributors
+
+This product includes software developed as part of the OpenTV project, licensed under the
+**GNU General Public License, version 3 or later** (SPDX: `GPL-3.0-or-later`). A verbatim copy
+of the licence is in [LICENSE](LICENSE).
+
+---
+
+## Attribution — this repository is a fork
+
+OpenTV was written from scratch by the upstream project at
+<https://github.com/opentvproject/opentv>. This repository is a fork of it, published at
+<https://github.com/T3lo5/opentv>.
+
+Every source file keeps its original copyright header:
+
+```
+This file is part of OpenTV.
+Copyright (C) 2026 The OpenTV Contributors
+Licensed under the GNU General Public License v3.0 or later.
+```
+
+The upstream copyright is not the fork's to take. The fork's own contributions are made under
+the same licence, which is what makes it possible to pass the whole thing on unchanged.
+
+Upstream's own words on forking are in [CONTRIBUTING.md](CONTRIBUTING.md), and they are worth
+quoting: *"the licence guarantees you that option, permanently, and using it is not a
+betrayal."*
+
+## What the GPL asks of this repository
+
+Because this repository publishes APKs, the obligations are live rather than theoretical:
+
+- The complete corresponding source for every published build is this repository, at the tag the
+  build was made from. The release notes of each APK name that tag.
+- The notices travel with the binary: the licence text, the copyright headers in the source, and
+  the About screen's licence notice.
+- No additional restrictions are imposed on the source (GPL §10). There is no "non-commercial
+  use only", no "do not fork", no NDA on the code.
+- The licence may not be changed to something more restrictive. GPL-3.0-or-later means version 3
+  or any later version — going back to GPL-2.0-only is not on the table.
+
+## Trademarks
+
+The GPL covers the code, not the name. "OpenTV" and the OpenTV logo remain the upstream
+project's; the licence grants the right to copy, modify and redistribute the work, not the right
+to imply the upstream endorses a fork.
+
+## Third-party components
+
+The build depends on third-party libraries, each under its own licence. None of them is
+copyleft, so none of them changes what this project owes — but their notices are theirs to keep.
+
+| Component | Licence |
+|---|---|
+| AndroidX (core-ktx, lifecycle, activity-compose, Compose, Material 3, Navigation, Work, DocumentFile, DataStore, TV Material) | Apache-2.0 |
+| AndroidX Media3 (ExoPlayer, HLS, DASH, RTSP, UI, Session, OkHttp data source) | Apache-2.0 |
+| AndroidX Room | Apache-2.0 |
+| OkHttp | Apache-2.0 |
+| Kotlin standard library, kotlinx.coroutines, kotlinx.serialization | Apache-2.0 |
+| ZXing core (barcode / QR) | Apache-2.0 |
+| Coil | Apache-2.0 |
+| SMBJ (`com.hierynomus:smbj`) | Apache-2.0 |
+| JUnit, Truth, Robolectric (test only) | Apache-2.0 / MIT |
+
+Apache-2.0 is compatible with GPL-3.0. Their copyright notices are reproduced in the jars
+themselves and are preserved by the build; nothing in this repository removes them.
+
+The XMLTV guides linked from the app (`docs`/the in-app guide settings) are third-party data,
+not part of this work. The UK Freeview feed is GPL-3.0, the same licence as this project.
+
+## No warranty
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.

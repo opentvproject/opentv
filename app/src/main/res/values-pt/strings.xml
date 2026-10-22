@@ -110,6 +110,7 @@
     <string name="player_aspect">Proporção</string>
     <string name="player_record">Gravar</string>
     <string name="player_pop_out">Destacar</string>
+    <string name="player_turn_off">Desligar</string>
     <string name="player_last">Anterior</string>
     <string name="player_quality_standard">Padrão</string>
     <string name="player_aspect_fit">Ajustar</string>
@@ -305,11 +306,14 @@
     <string name="about_built_open_body">O OpenTV é desenvolvido de forma aberta, com a IA a fazer uma grande parte da programação sob direção humana — isto é dito claramente, não escondido. Por ser de código aberto, nenhuma pessoa a desaparecer pode acabar com ele: qualquer pessoa pode ler todas as linhas, compilá-lo e continuar o projeto.</string>
     <string name="about_support_title">Apoiar o projeto</string>
     <string name="about_scan_to_donate">Digitalize para doar</string>
+    <string name="about_donation_goes_to_upstream">Estas doações vão para o mantenedor original do OpenTV, que escreveu o projeto de origem — este fork mantém o crédito onde ele é devido.</string>
     <string name="about_licence_links_title">Licença e ligações</string>
     <string name="about_licence_label">Licença</string>
     <string name="about_source_code">Código-fonte</string>
     <string name="about_report_bug">Reportar um erro / pedir uma funcionalidade</string>
     <string name="about_install_page">Página de instalação</string>
+    <string name="about_upstream_project">Projeto de origem</string>
+    <string name="about_free_software_notice">Este programa é software livre: pode redistribuí-lo e/ou modificá-lo sob os termos da Licença Pública Geral GNU, tal como publicada pela Free Software Foundation, tanto na versão 3 da licença, como (a seu critério) em qualquer versão posterior.\n\nEste programa é distribuído com a esperança de que seja útil, mas SEM QUALQUER GARANTIA; sem sequer a garantia implícita de COMERCIALIZAÇÃO ou ADEQUAÇÃO A UM DETERMINADO FIM. Consulte a Licença Pública Geral GNU para mais detalhes.\n\nDeve ter recebido uma cópia da Licença Pública Geral GNU junto com este programa. Se não recebeu, veja https://www.gnu.org/licenses/.</string>
     <string name="onboarding_default_provider_name">O meu fornecedor</string>
     <string name="onboarding_default_playlist_name">A minha lista</string>
     <string name="onboarding_add_provider_title">Adicione o seu fornecedor</string>

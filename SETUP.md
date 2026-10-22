@@ -3,6 +3,10 @@
 One-time setup. After this, every tagged release builds itself and appears on the install page
 automatically.
 
+> This repository is a fork of [opentvproject/opentv](https://github.com/opentvproject/opentv);
+> see [NOTICE](NOTICE). The steps below are the upstream ones, with this fork's URLs — the
+> licence obligations that come with publishing builds are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ---
 
 ## 1. Create the repository
@@ -10,8 +14,8 @@ automatically.
 On [github.com/new](https://github.com/new):
 
 - **Name:** `opentv`
-- **Visibility:** Public — GitHub Pages and Actions are free on public repos, and the whole
-  point of the project is that people can read it
+- **Visibility:** Public — GitHub Actions is free on public repos, and the whole point of the
+  project is that people can read it
 - **Do not** tick "Add a README", ".gitignore" or "Choose a license" — this repo already has
   all three, and an initialised repo makes the first push awkward
 
@@ -21,7 +25,7 @@ From the unzipped `opentv` folder:
 
 ```bash
 cd opentv
-git remote add origin https://github.com/opentvproject/opentv.git
+git remote add origin https://github.com/T3lo5/opentv.git
 git push -u origin main
 ```
 
@@ -30,15 +34,18 @@ The repo already has an initial commit, so there is nothing to stage.
 If git asks for a password, it wants a **personal access token**, not your account password —
 GitHub stopped accepting passwords over HTTPS. Generate one at
 **Settings → Developer settings → Personal access tokens → Tokens (classic)** with the `repo`
-scope, and paste that when prompted.
+scope, and paste it when prompted.
 
 ## 3. Funding links (optional)
 
 The "Sponsor" button on the repo comes from `.github/FUNDING.yml` — it points at GitHub Sponsors
 and a PayPal donate link. Edit that file to change them. Everything else already points at
-`opentvproject/opentv`.
+`T3lo5/opentv`.
 
-## 4. Turn on Pages
+The donation links are deliberately still the upstream maintainer's: they wrote the original,
+and the licence's whole point is that the work stays theirs.
+
+## 4. Turn on Pages (optional)
 
 **Settings → Pages → Build and deployment → Source: GitHub Actions.**
 
@@ -48,10 +55,20 @@ That's the only setting. Don't pick "Deploy from a branch" — the workflow in
 Your install page will be at:
 
 ```
-https://opentvproject.github.io/opentv/
+https://t3lo5.github.io/opentv/
 ```
 
 It goes live a minute or two after the first push.
+
+**This fork does not have Pages enabled**, so `.github/workflows/pages.yml` has nothing to
+publish to and the app's "Install page" button points at the **releases** instead:
+
+```
+https://github.com/T3lo5/opentv/releases
+```
+
+Either turn Pages on and change that link back, or leave it off and use the releases. Both are
+fine; the releases are what the app links to today.
 
 ## 5. Cut the first release
 
@@ -76,14 +93,21 @@ git tag v0.1.0 && git push origin v0.1.0
 
 ## 6. Install it on the TV
 
-Open the install page and follow the steps there. The short address to type into the
-**Downloader** app is:
+The releases are where the APK lives:
+
+```
+https://github.com/T3lo5/opentv/releases
+```
+
+Upstream also has a short address that always redirects to the newest **upstream** APK, so it
+never needs changing between releases:
 
 ```
 opentvproject.github.io/opentv/apk
 ```
 
-That link always redirects to the newest APK, so it never needs changing between releases.
+A short code in the **Downloader** app for this fork's own APKs has to be registered with
+aftv.news by whoever runs the fork — `6398449` belongs to upstream.
 
 ---
 

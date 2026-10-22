@@ -18,11 +18,15 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import app.opentv.core.AppSettings
+import app.opentv.core.BufferPreset
+import app.opentv.core.DecoderPreference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -84,6 +88,12 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
+    /**
+     * How much video to keep buffered. Read once per playback session, so changing the
+     * setting never tears down a player that is running; it applies the next time a
+     * playback session opens.
+     */
+    bufferPreset: BufferPreset = AppSettings.get(context).bufferPreset.value,
 ) {
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
@@ -179,6 +189,38 @@ class PlayerController(
             .build()
     }
 
+    /**
+     * Which decoder the player reaches for. Read once per playback session, so changing it
+     * never tears down a player that is running.
+     */
+    private val decoderPreference: DecoderPreference = AppSettings.get(context).decoderPreference.value
+
+    /**
+     * The buffer this player uses.
+     *
+     * The guide preview, the DVR window and a recording still being written keep their own
+     * tuning: each of those is measured for what it does, and a user-chosen buffer would
+     * make the preview hoard memory or the DVR lose the headroom it rides on.
+     */
+    private val playbackBuffer =
+        if (preview || dvr || liveRecording) BufferPreset.DEFAULT else bufferPreset
+
+    /**
+     * The renderers factory, and with it the decoder choice.
+     *
+     * Only built when the user asked for the software decoder: the default factory is
+     * ExoPlayer's, and a custom one has to be told to keep the decoder fallback on so a
+     * codec that refuses to start is not the end of the road.
+     */
+    private val renderersFactory: DefaultRenderersFactory? =
+        if (decoderPreference == DecoderPreference.SOFTWARE_FIRST) {
+            DefaultRenderersFactory(context)
+                .setMediaCodecSelector(SoftwareFirstCodecSelector())
+                .setEnableDecoderFallback(true)
+        } else {
+            null
+        }
+
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setSeekBackIncrementMs(SEEK_INCREMENT_MILLIS)
         .setSeekForwardIncrementMs(SEEK_INCREMENT_MILLIS)
@@ -187,25 +229,26 @@ class PlayerController(
                 .setLoadErrorHandlingPolicy(loadErrorPolicy),
         )
         .setTrackSelector(trackSelector)
+        .apply { renderersFactory?.let { setRenderersFactory(it) } }
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    if (preview) PREVIEW_MIN_BUFFER_MILLIS else MIN_BUFFER_MILLIS,
+                    if (preview) PREVIEW_MIN_BUFFER_MILLIS else playbackBuffer.minBufferMillis,
                     when {
                         preview -> PREVIEW_MAX_BUFFER_MILLIS
                         dvr -> DVR_MAX_BUFFER_MILLIS
                         liveRecording -> LIVE_REC_MAX_BUFFER_MILLIS
-                        else -> MAX_BUFFER_MILLIS
+                        else -> playbackBuffer.maxBufferMillis
                     },
                     when {
                         preview -> PREVIEW_BUFFER_FOR_PLAYBACK_MILLIS
                         liveRecording -> LIVE_REC_BUFFER_FOR_PLAYBACK_MILLIS
-                        else -> BUFFER_FOR_PLAYBACK_MILLIS
+                        else -> playbackBuffer.playbackBufferMillis
                     },
                     when {
                         preview -> PREVIEW_BUFFER_AFTER_REBUFFER_MILLIS
                         liveRecording -> LIVE_REC_BUFFER_AFTER_REBUFFER_MILLIS
-                        else -> BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MILLIS
+                        else -> playbackBuffer.rebufferMillis
                     },
                 )
                 // Retain the last few minutes so pause/rewind of live TV has something to seek into.
@@ -353,6 +396,28 @@ class PlayerController(
     }
 
     val isSeekable: Boolean get() = player.isCurrentMediaItemSeekable
+
+    /**
+     * How far back live TV can be rewound: the retained back buffer, zero when the shallow
+     * DVR is off.
+     *
+     * This is the *client-side* window — ExoPlayer holds the last couple of minutes of
+     * live TV in memory so a paused picture can be scrubbed. It is not the provider's
+     * archive: that is a different thing entirely, reached through the catch-up URL.
+     */
+    val backBufferMillis: Long get() = if (dvr) DVR_BACK_BUFFER_MILLIS.toLong() else 0L
+
+    /**
+     * Back to the live edge.
+     *
+     * The edge is where the stream is being produced, not where playback is: a live player
+     * deliberately rides a few seconds behind it so it can absorb a hiccup. ExoPlayer's
+     * default position is exactly that point, and for a live window it is the live edge
+     * minus the target offset — which is where the picture belongs.
+     */
+    fun seekToLive() {
+        player.seekToDefaultPosition()
+    }
 
     private fun firstSupportedIndex(group: Tracks.Group): Int {
         for (i in 0 until group.length) if (group.isTrackSupported(i)) return i

@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.opentv.BuildConfig
 import app.opentv.R
+import app.opentv.core.ProjectInfo
 import app.opentv.core.ServiceLocator
 import app.opentv.update.UpdateChecker
 import kotlinx.coroutines.launch
@@ -161,6 +162,12 @@ fun AboutScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.about_donation_goes_to_upstream),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -168,12 +175,19 @@ fun AboutScreen(onBack: () -> Unit) {
         Section(stringResource(R.string.about_licence_links_title)) {
             LinkLine(
                 stringResource(R.string.about_licence_label),
-                "GNU General Public License v3.0",
-                url = "https://www.gnu.org/licenses/gpl-3.0.html",
+                ProjectInfo.LICENSE_NAME,
+                url = ProjectInfo.LICENSE_URL,
             )
-            LinkLine(stringResource(R.string.about_source_code), "github.com/opentvproject/opentv")
-            LinkLine(stringResource(R.string.about_report_bug), "github.com/opentvproject/opentv/issues")
-            LinkLine(stringResource(R.string.about_install_page), "opentvproject.github.io/opentv")
+            LinkLine(stringResource(R.string.about_source_code), ProjectInfo.SOURCE_URL.removePrefix("https://"))
+            LinkLine(stringResource(R.string.about_report_bug), ProjectInfo.ISSUES_URL.removePrefix("https://"))
+            LinkLine(stringResource(R.string.about_install_page), ProjectInfo.RELEASES_URL.removePrefix("https://"))
+            LinkLine(stringResource(R.string.about_upstream_project), ProjectInfo.UPSTREAM_URL.removePrefix("https://"))
+            Spacer(Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.about_free_software_notice),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

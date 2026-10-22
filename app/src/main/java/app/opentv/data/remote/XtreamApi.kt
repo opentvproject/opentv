@@ -271,9 +271,19 @@ class XtreamApi(
         )
     }
 
-    /** Opens the XMLTV guide as a stream. The caller must close it. */
-    suspend fun openEpgStream(source: Source): InputStream = withContext(Dispatchers.IO) {
-        val url = source.epgUrl?.toHttpUrlOrNull() ?: xmltvUrl(source)
+    /**
+     * Opens the XMLTV guide as a stream. The caller must close it.
+     *
+     * [prevDays] and [nextDays] are how much guide to ask the panel for. The panel's own
+     * default is one day either way, which is less than the app's guide window shows, so
+     * they are asked for explicitly rather than left to chance.
+     */
+    suspend fun openEpgStream(
+        source: Source,
+        prevDays: Int? = null,
+        nextDays: Int? = null,
+    ): InputStream = withContext(Dispatchers.IO) {
+        val url = source.epgUrl?.toHttpUrlOrNull() ?: xmltvUrl(source, prevDays, nextDays)
         val response = http.newCall(request(source, url)).execute()
         if (!response.isSuccessful) {
             response.close()
@@ -297,21 +307,53 @@ class XtreamApi(
     /**
      * Catch-up / archive stream for a past programme. Uses the widely-supported path form
      * `/timeshift/{user}/{pass}/{durationMinutes}/{yyyy-MM-dd:HH-mm}/{streamId}.ts`, which returns a
-     * seekable MPEG-TS just like a recording. The start time is formatted in the device's local
-     * zone, matching how the guide shows programme times.
+     * seekable MPEG-TS just like a recording.
+     *
+     * The start time is written on the **provider's** clock, not the device's. The panel
+     * stores its archive as `/tv_archive/{stream_id}/YYYY-MM-DD:HH-mm.ts` and looks that name
+     * up against its own timezone, so a device in São Paulo asking a Paris panel for "19:00"
+     * would be asking for a recording from three hours earlier — the wrong programme, or none
+     * at all. The panel's zone comes from its `server_info` and is kept on the source; when
+     * nothing says otherwise, the device's own zone is used, which is what the app did
+     * before and is right whenever the two agree.
      */
     fun catchupUrl(source: Source, streamId: String, startUtcMillis: Long, durationMinutes: Int): String {
         val stamp = java.text.SimpleDateFormat("yyyy-MM-dd:HH-mm", java.util.Locale.US)
+            .apply { timeZone = zoneOf(source.timezone) }
             .format(java.util.Date(startUtcMillis))
         val minutes = durationMinutes.coerceAtLeast(1)
         return "${source.url}/timeshift/${source.username}/${source.password}/$minutes/$stamp/$streamId.ts"
     }
 
-    private fun xmltvUrl(source: Source): HttpUrl =
+    companion object {
+        /**
+         * The zone a provider's clock runs on.
+         *
+         * Java's own list of zones is the only map there is from the name a panel reports to
+         * an offset, so that is what we use. A name Java does not know falls back to the
+         * device's zone rather than to UTC: guessing UTC would be worse than the old
+         * behaviour, which at least agreed with the viewer whenever the provider was local.
+         */
+        fun zoneOf(id: String?): java.util.TimeZone {
+            val name = id?.trim().orEmpty()
+            if (name.isEmpty()) return java.util.TimeZone.getDefault()
+            if (!java.util.TimeZone.getAvailableIDs().contains(name)) return java.util.TimeZone.getDefault()
+            return java.util.TimeZone.getTimeZone(name)
+        }
+    }
+
+    private fun xmltvUrl(source: Source, prevDays: Int?, nextDays: Int?): HttpUrl =
         baseUrl(source).newBuilder()
             .encodedPath("/xmltv.php")
             .addQueryParameter("username", source.username.orEmpty())
             .addQueryParameter("password", source.password.orEmpty())
+            .apply {
+                // Asked for explicitly, because a panel only answers for the window it
+                // generated — and for another one it answers with an empty body and no
+                // error. Null leaves the panel's own default alone.
+                if (prevDays != null) addQueryParameter("prev_days", prevDays.coerceAtLeast(0).toString())
+                if (nextDays != null) addQueryParameter("next_days", nextDays.coerceAtLeast(0).toString())
+            }
             .build()
 
     private fun baseUrl(source: Source): HttpUrl =
@@ -334,7 +376,10 @@ class XtreamApi(
 
         http.newCall(request(source, builder.build())).execute().use { response ->
             if (!response.isSuccessful) {
-                throw XtreamException(describeHttpFailure(response.code))
+                // Only a 404 is worth a second request: it is the one code that means two
+                // different things, and only the address itself can tell them apart.
+                val rootStatus = if (response.code == 404) probeAddress(source) else null
+                throw XtreamException(describeHttpFailure(response.code, rootStatus))
             }
             val text = response.body?.string().orEmpty()
             if (text.isBlank()) throw XtreamException("The server returned an empty response.")
@@ -352,17 +397,47 @@ class XtreamApi(
         }
     }
 
+    /**
+     * Asks the bare address how it is doing, so a 404 can be told apart from a dead provider.
+     *
+     * A CDN in front of a panel that has gone down answers 404 for everything, which looks
+     * exactly like a wrong address. The root of the same host says which it is: a server
+     * error there means the provider is down and there is nothing for the user to fix.
+     *
+     * Null when the address could not be reached at all.
+     */
+    private fun probeAddress(source: Source): Int? = runCatching {
+        val url = source.url.toHttpUrlOrNull() ?: return null
+        http.newCall(request(source, url)).execute().use { it.code }
+    }.getOrNull()
+
     private fun request(source: Source, url: HttpUrl): Request =
         Request.Builder()
             .url(url)
             .header("User-Agent", source.userAgent)
             .build()
 
-    private fun describeHttpFailure(code: Int): String = when (code) {
+    /**
+     * Turns a failed request into a sentence that says what to do about it.
+     *
+     * @param rootStatus what the bare address answered, when it was asked. Null means it
+     *   could not be reached, or that nobody asked (only a 404 is worth asking about).
+     */
+    internal fun describeHttpFailure(code: Int, rootStatus: Int? = null): String = when (code) {
         401, 403 -> "The server refused the request (HTTP $code). The username or password " +
             "may be wrong, or the provider may be blocking this app's User-Agent — try " +
             "changing it in the source's advanced settings."
-        404 -> "No Xtream API at that address (HTTP 404). Check the URL and port."
+        404 -> when {
+            rootStatus == null -> "No Xtream API at that address (HTTP 404), and the address " +
+                "itself could not be reached. Check the URL and port — and if the address is " +
+                "right, the provider is probably down."
+            rootStatus >= 500 -> "The provider's server is not answering (HTTP $rootStatus on " +
+                "the address itself, HTTP 404 on its API). The panel appears to be down — " +
+                "nothing to fix here; try again later or ask your provider."
+            else -> "The address answers (HTTP $rootStatus), but there is no Xtream API on it " +
+                "(HTTP 404). Check the URL and port — and note that a plain M3U playlist " +
+                "belongs in the \"M3U playlist URL\" tab, not here."
+        }
         405 -> "The server rejected the request method (HTTP 405). This usually means the " +
             "address points at a plain playlist rather than an Xtream panel."
         429 -> "The server is rate-limiting this device (HTTP 429). Try again shortly."

@@ -22,6 +22,17 @@ bash test-run.sh        # reinstalls, launches, records to testrun.log, shows a 
 | F | State survives | Favourites/hidden survive a refresh and an app restart |
 | G | Fast switching | Holding channel-change never wedges playback (one tune when you stop) |
 
+## The automated suite
+
+```bash
+./gradlew test          # unit tests: parsers, matching, repositories, the Room migrations
+```
+
+Everything runs on the JVM — no device, no emulator. The Room migrations are tested against
+the exported schemas, so a migration that does not produce exactly what Room expects fails
+here rather than on a user's phone. **If you add a migration:** bump the version, add it to
+the chain in `DatabaseMigrationTest`, and re-export the schema (the build does it).
+
 ## Reading the log
 
 Interesting lines and what they mean:

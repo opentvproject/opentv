@@ -13,6 +13,7 @@ import app.opentv.data.db.ProgrammeDao
 import app.opentv.data.db.SourceDao
 import app.opentv.data.model.EpgChannelAlias
 import app.opentv.data.model.EpgFeed
+import app.opentv.core.AppSettings
 import app.opentv.data.model.Programme
 import app.opentv.data.model.Source
 import app.opentv.data.parser.ChannelNameNormalizer
@@ -63,7 +64,18 @@ class EpgRepository(
     private val sourceDao: SourceDao,
     private val api: XtreamApi,
     private val http: OkHttpClient,
+    private val settings: AppSettings,
 ) {
+
+    /**
+     * How much guide to keep, in milliseconds.
+     *
+     * The user's choice, because the cost of more is real: a bigger database on the box and
+     * a longer download on every sync. It is a ceiling — a provider only serves what its
+     * own archive holds.
+     */
+    private val retentionMillis: Long
+        get() = settings.guideHistory.value.days * DAY_MILLIS
 
     data class SyncSummary(
         val feedsSucceeded: Int,
@@ -85,6 +97,28 @@ class EpgRepository(
 
     suspend fun upcoming(epgChannelId: String, nowUtcMillis: Long, limit: Int = 12): List<Programme> =
         programmeDao.upcoming(epgChannelId, nowUtcMillis, limit)
+
+    /**
+     * The programmes a channel has already finished, most recent first — what catch-up plays.
+     *
+     * The guide grid starts at the current half-hour, so the past never reaches the screen
+     * even though the rows are still in the table. The candidate ids are walked in the same
+     * order the guide uses (override → provider → matched) and the first one that has
+     * anything wins, so a channel whose override id never lights up still finds its
+     * programmes.
+     */
+    suspend fun finished(
+        epgChannelIds: List<String>,
+        nowUtcMillis: Long,
+        limit: Int = 12,
+    ): List<Programme> {
+        val since = nowUtcMillis - retentionMillis
+        for (id in epgChannelIds) {
+            val past = programmeDao.finished(id, nowUtcMillis, since, limit)
+            if (past.isNotEmpty()) return past
+        }
+        return emptyList()
+    }
 
     // ---- Feed management -------------------------------------------------------------------
 
@@ -109,6 +143,12 @@ class EpgRepository(
     /**
      * Makes sure the standing feed rows exist: one per provider source, plus the curated
      * built-in list. Insert-if-absent, so user toggles survive every call.
+     *
+     * A built-in whose file has been renamed upstream is *repointed* rather than duplicated:
+     * the host that serves these guides renames files now and then (the US and Canadian
+     * ones moved from 1 to 2), and a row pointing at a file that no longer exists is a dead
+     * feed the user cannot fix from the settings screen. Repointing keeps the user's
+     * on/off choice and the programmes already downloaded.
      */
     suspend fun ensureFeeds() {
         for (source in sourceDao.enabled()) {
@@ -123,6 +163,12 @@ class EpgRepository(
             }
         }
         for ((name, url) in BUILT_IN_FEEDS) {
+            val existing = feedDao.builtInByName(name)
+            if (existing != null) {
+                if (existing.url != url) feedDao.setUrl(existing.id, url)
+                continue
+            }
+            // The user added this URL themselves: do not create a second copy of it.
             if (feedDao.byUrl(url) == null) {
                 // Off by default: shipping a switched-on 20 MB download for a country the
                 // user may not live in would be rude. The EPG settings screen makes
@@ -159,6 +205,13 @@ class EpgRepository(
                             "${result.programmes} programmes, ${result.channels} channels",
                         )
                     }
+                    is FeedResult.Empty -> {
+                        // Every window came back empty: the panel holds a guide for a
+                        // window it was never asked for, or holds none at all.
+                        failed++
+                        feedDao.markSynced(feed.id, feed.lastSyncMillis, result.reason)
+                        Log.w(TAG, "Feed '${feed.name}' is empty: ${result.reason}")
+                    }
                     is FeedResult.Failed -> {
                         failed++
                         // The stamp is NOT advanced on failure, so the next sync retries
@@ -170,7 +223,7 @@ class EpgRepository(
             }
 
             if (succeeded > 0) {
-                programmeDao.deleteEndedBefore(nowUtcMillis - RETENTION_PAST_MILLIS)
+                programmeDao.deleteEndedBefore(nowUtcMillis - retentionMillis)
             }
 
             val (matched, total) = runMatcher()
@@ -180,15 +233,66 @@ class EpgRepository(
     private sealed interface FeedResult {
         data class Success(val programmes: Int, val channels: Int) : FeedResult
         data class Failed(val reason: String) : FeedResult
+
+        /**
+         * The feed downloaded, but held no programmes.
+         *
+         * A panel serves the guide it generated ahead of time, for one window: asked for
+         * another, it answers with an empty body and no error to notice. That is not a
+         * failure — it is a window the panel does not have, and another one may.
+         */
+        data class Empty(val reason: String) : FeedResult
     }
 
     private suspend fun syncFeed(feed: EpgFeed, nowUtcMillis: Long): FeedResult {
+        val windows = guideWindows(feed)
+        var empty: FeedResult.Empty? = null
+        for (window in windows) {
+            when (val result = syncFeedWindow(feed, nowUtcMillis, window)) {
+                is FeedResult.Success -> return result
+                is FeedResult.Empty -> {
+                    // An empty answer costs nothing to ask for — it is a zero-byte file —
+                    // so the next window is worth a try.
+                    empty = result
+                }
+                is FeedResult.Failed -> return result
+            }
+        }
+        return empty ?: FeedResult.Failed("Download failed.")
+    }
+
+    /**
+     * The windows to ask a panel for, in the order to try them.
+     *
+     * The first is the one the user asked for: how much guide the app is going to keep.
+     * The rest are the windows panels are commonly generated with, because a panel cannot
+     * be asked which one it has — it only ever answers for the one it made.
+     */
+    private fun guideWindows(feed: EpgFeed): List<GuideWindow> {
+        if (feed.providerSourceId == null) return listOf(GuideWindow(null, null))
+        val asked = settings.guideHistory.value.days
+        return listOf(
+            GuideWindow(asked, 2),
+            GuideWindow(3, 1),
+            GuideWindow(1, 1),
+            GuideWindow(7, 2),
+        ).distinct()
+    }
+
+    /** How many days back and forward to ask a panel for. */
+    private data class GuideWindow(val prevDays: Int?, val nextDays: Int?)
+
+    private suspend fun syncFeedWindow(
+        feed: EpgFeed,
+        nowUtcMillis: Long,
+        window: GuideWindow,
+    ): FeedResult {
         val batch = ArrayList<Programme>(BATCH_SIZE)
         val aliases = ArrayList<EpgChannelAlias>(256)
         var written = 0
 
         try {
-            openFeedStream(feed).use { stream ->
+            openFeedStream(feed, window).use { stream ->
                 val stats = XmltvParser.parse(
                     input = stream,
                     feedId = feed.id,
@@ -203,7 +307,7 @@ class EpgRepository(
                     onProgramme = { programme ->
                         // Skip anything that finished before the retention cut-off; no point
                         // writing rows we are about to prune.
-                        if (programme.endUtcMillis >= nowUtcMillis - RETENTION_PAST_MILLIS) {
+                        if (programme.endUtcMillis >= nowUtcMillis - retentionMillis) {
                             batch += programme
                             if (batch.size >= BATCH_SIZE) {
                                 programmeDao.upsertAll(batch)
@@ -222,7 +326,7 @@ class EpgRepository(
                 }
 
                 if (written == 0 && stats.programmeCount == 0) {
-                    return FeedResult.Failed("Downloaded, but contained no programmes.")
+                    return FeedResult.Empty("Downloaded, but contained no programmes.")
                 }
                 return FeedResult.Success(written, stats.channelCount)
             }
@@ -243,12 +347,18 @@ class EpgRepository(
      * the first two bytes for the gzip magic number handles both, regardless of what the
      * URL or the headers claim.
      */
-    private suspend fun openFeedStream(feed: EpgFeed): InputStream {
+    private suspend fun openFeedStream(feed: EpgFeed, window: GuideWindow): InputStream {
         val raw: InputStream = when {
             feed.providerSourceId != null -> {
                 val source: Source = sourceDao.byId(feed.providerSourceId)
                     ?: throw IllegalStateException("Provider for this guide no longer exists.")
-                api.openEpgStream(source)
+                // The panel is asked for exactly as much guide as the app is going to keep:
+                // asking for more would only be thrown away by the next prune.
+                api.openEpgStream(
+                    source,
+                    prevDays = window.prevDays,
+                    nextDays = window.nextDays,
+                )
             }
             feed.url != null -> {
                 val response = http.newCall(Request.Builder().url(feed.url).build()).execute()
@@ -347,8 +457,10 @@ class EpgRepository(
         /** Writes per transaction. Large enough to be fast, small enough not to hold WAL open. */
         const val BATCH_SIZE = 500
 
-        /** Keep finished programmes for a day so "what was on" still works. */
-        val RETENTION_PAST_MILLIS: Long = TimeUnit.DAYS.toMillis(1)
+        private const val DAY_MILLIS = 86_400_000L
+
+        /** How far ahead the guide window reaches — a day and a bit of the next. */
+        private const val GUIDE_LOOKAHEAD_DAYS = 2
 
         /** Feeds publish rolling windows; refreshing more often than this is rude. */
         val REFRESH_INTERVAL_MILLIS: Long = TimeUnit.HOURS.toMillis(6)
@@ -360,6 +472,12 @@ class EpgRepository(
          *
          * The UK Freeview entry is GPL-3.0 (same licence as OpenTV), regenerated every
          * 12 h, ~270 channels with logos — verified working before it earned this slot.
+         *
+         * The epgshare01 files are numbered per country, and the host renumbers them when
+         * it regroups a feed: the US and Canadian ones moved from 1 to 2. A stale number
+         * is a 404, and the settings screen can only say so — so the numbers here are
+         * checked against the server's own index, which also lists the current date and
+         * size of every file.
          */
         /** A region needs at least this many prefixed channels before we act on it. */
         const val MIN_CHANNELS_FOR_AUTO_REGION = 5
@@ -381,9 +499,9 @@ class EpgRepository(
             "UK — epgshare01 (Sky lineup)" to
                 "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz",
             "USA — epgshare01" to
-                "https://epgshare01.online/epgshare01/epg_ripper_US1.xml.gz",
+                "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
             "Canada — epgshare01" to
-                "https://epgshare01.online/epgshare01/epg_ripper_CA1.xml.gz",
+                "https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz",
             "Australia — epgshare01" to
                 "https://epgshare01.online/epgshare01/epg_ripper_AU1.xml.gz",
         )

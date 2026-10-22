@@ -22,6 +22,7 @@ import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.model.StremioStream
 import app.opentv.data.model.StreamKind
+import app.opentv.data.model.catchupCovers
 import app.opentv.data.parser.displayTitle
 import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.repo.CatalogRepository
@@ -302,27 +303,41 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
     private val _guideDayOffset = MutableStateFlow(0)
     val guideDayOffset: StateFlow<Int> = _guideDayOffset.asStateFlow()
 
-    /** Page the guide a day forward/back (clamped to today…+[GUIDE_MAX_DAYS]), or jump back to now. */
+    /**
+     * Page the guide a day forward/back — clamped to yesterday…+[GUIDE_MAX_DAYS] — or jump
+     * back to now.
+     *
+     * Yesterday is reachable because that is where the past is: the guide window starts at
+     * the current half-hour, so a programme that has already aired is not on today's page.
+     */
     fun nudgeGuideDay(delta: Int) {
-        _guideDayOffset.value = (_guideDayOffset.value + delta).coerceIn(0, GUIDE_MAX_DAYS)
+        _guideDayOffset.value = (_guideDayOffset.value + delta).coerceIn(-1, GUIDE_MAX_DAYS)
     }
 
     fun guideToNow() { _guideDayOffset.value = 0 }
 
     val windowStartMillis: StateFlow<Long> =
         combine(nowTick.map { it - it % HALF_HOUR_MILLIS }, _guideDayOffset) { base, day ->
-            // Today tracks the current half-hour so live is always on screen; a future day starts
-            // at that day's local midnight, so the whole day's schedule is browsable and drifts
-            // with real time only on the "today" page.
-            if (day <= 0) base else startOfLocalDay(base) + day * DAY_MILLIS
+            // Today tracks the current half-hour so live is always on screen; any other day
+            // starts at that day's local midnight, so the whole day's schedule is browsable —
+            // which is how yesterday's programmes, and the catch-up they offer, are reached.
+            if (day == 0) base else startOfLocalDay(base, day)
         }.stateIn(
             viewModelScope, SharingStarted.WhileSubscribed(5_000),
             System.currentTimeMillis().let { it - it % HALF_HOUR_MILLIS },
         )
 
-    private fun startOfLocalDay(millis: Long): Long {
+    /**
+     * The local midnight of the day [dayOffset] days away from [millis].
+     *
+     * Calendar arithmetic rather than adding 24-hour chunks: a clock change in the night
+     * would otherwise move the start of the day by an hour — which on a guide that is
+     * drawn to the minute is a whole programme off.
+     */
+    private fun startOfLocalDay(millis: Long, dayOffset: Int): Long {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = millis
+        if (dayOffset != 0) cal.add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
         cal.set(java.util.Calendar.MINUTE, 0)
         cal.set(java.util.Calendar.SECOND, 0)
@@ -476,6 +491,38 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         count < 2000 -> "Loading $count channels — a small one, this'll be quick."
         count < 8000 -> "Loading $count channels — a fair few, give me a moment…"
         else -> "Loading $count channels — a big one, bear with me, I'm on it…"
+    }
+
+    /**
+     * The programmes this channel has already finished, newest first — the catch-up list.
+     *
+     * The guide grid starts at the current half-hour, so the past never reaches the screen
+     * even though the rows are still in the table. They are exactly what the archive plays
+     * back, and they are the difference between a catch-up feature and a dead button.
+     *
+     * Only what the provider still keeps is offered: a link to a recording it has thrown
+     * away is a 404 waiting to happen.
+     */
+    suspend fun finishedProgrammes(row: Row, nowUtcMillis: Long, limit: Int = 12): List<Programme> =
+        finishedProgrammes(row.primary, row.variants, nowUtcMillis, limit)
+
+    /**
+     * The same list, for a channel the caller already has: the player knows the channel it
+     * is showing and does not have a [Row] to hand.
+     */
+    suspend fun finishedProgrammes(
+        channel: Channel,
+        variants: List<Channel>,
+        nowUtcMillis: Long,
+        limit: Int = 12,
+    ): List<Programme> {
+        if (!channel.tvArchive) return emptyList()
+        val past = graph.epgRepository.finished(
+            epgChannelIds = variants.flatMap { it.epgCandidates },
+            nowUtcMillis = nowUtcMillis,
+            limit = limit,
+        )
+        return past.filter { channel.catchupCovers(it.startUtcMillis, nowUtcMillis) }
     }
 
     val favourites: StateFlow<List<Channel>> =

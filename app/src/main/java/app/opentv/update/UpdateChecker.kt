@@ -5,6 +5,7 @@
  */
 package app.opentv.update
 
+import app.opentv.core.ProjectInfo
 import app.opentv.data.remote.GitHubRelease
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,8 +80,12 @@ class UpdateChecker(
     }
 
     companion object {
-        /** The single place the project's GitHub location is written down. */
-        const val REPO_SLUG = "opentvproject/opentv"
+        /**
+         * The project's GitHub location. The releases published there are the ones this build
+         * updates from, so it has to be the repository of *this* build — not the project it was
+         * forked from. See [app.opentv.core.ProjectInfo].
+         */
+        const val REPO_SLUG = ProjectInfo.REPO_SLUG
 
         /**
          * The GitHub release body is written for developers and has GitHub's auto-generated

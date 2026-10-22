@@ -1,0 +1,27 @@
+[
+ {
+  "category_id": "112",
+  "category_name": " Canais | Jogos de hoje ",
+  "parent_id": 0
+ },
+ {
+  "category_id": "1000070",
+  "category_name": "Canais | Eventos",
+  "parent_id": 0
+ },
+ {
+  "category_id": "1000071",
+  "category_name": "Canais | Reality",
+  "parent_id": 0
+ },
+ {
+  "category_id": "4",
+  "category_name": "Canais | Globo Sudeste",
+  "parent_id": 0
+ },
+ {
+  "category_id": "8",
+  "category_name": "Canais | Globo Centro-Oeste",
+  "parent_id": 0
+ }
+]

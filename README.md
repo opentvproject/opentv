@@ -4,11 +4,22 @@
 
 No account. No subscription. No server of ours between you and your provider.
 
-[![Build](https://github.com/opentvproject/opentv/actions/workflows/build.yml/badge.svg)](https://github.com/opentvproject/opentv/actions/workflows/build.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Build](https://github.com/T3lo5/opentv/actions/workflows/build.yml/badge.svg)](https://github.com/T3lo5/opentv/actions/workflows/build.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsors-ea4aaa.svg)](https://github.com/sponsors/legionnaireneyland)
 
 ---
+
+> **This repository is a fork of [OpenTV](https://github.com/opentvproject/opentv).** It is the same
+> project — same licence, same promise, upstream's copyright notices intact — kept alive and
+> extended here. Upstream wrote it from scratch; this fork builds on it.
+>
+> The APKs published from this repository carry the upstream's code, so the GPL applies to them
+> as it does to upstream's: the complete corresponding source is this repository, the build is
+> public, and the notices travel with the binary. [NOTICE](NOTICE) has the attribution;
+> [Licence](#licence) spells out what a fork that ships builds has to do.
+>
+> The donation links below still go to the upstream maintainer, who wrote the original.
 
 > **Support OpenTV** — it's free and always will be. If it saved you from a dead "lifetime"
 > app, you can chip in via **[GitHub Sponsors](https://github.com/sponsors/legionnaireneyland)**
@@ -30,6 +41,7 @@ GPL-licensed. If the current maintainers vanish tomorrow, anyone can fork it, bu
 keep it alive. That is the entire point.
 
 **OpenTV is not a fork or a decompilation of any existing app.** It is written from scratch.
+(This repository is a fork of OpenTV — see the note at the top.)
 
 ## What it does
 
@@ -77,23 +89,22 @@ Open-source through and through — the About screen carries the licence, the li
 
 ## Install
 
-**→ [Install page](https://opentvproject.github.io/opentv/)** — step-by-step for Chromecast with
-Google TV, Android TV boxes, Fire TV Sticks, and phones.
+**→ [Releases](https://github.com/T3lo5/opentv/releases)** — the APKs this repository builds,
+one per tagged version.
 
-On a TV, the quickest route is the **[Downloader app](https://www.aftvnews.com/downloader/)** —
-enter the code:
+Upstream also keeps its own [install page](https://opentvproject.github.io/opentv/) with
+step-by-step instructions for Chromecast with Google TV, Android TV boxes, Fire TV Sticks and
+phones.
 
-```
-6398449
-```
-
-That code (or `aftv.news/6398449` in a browser) always points at the newest APK, so it never
-goes stale. On a phone, the [install page](https://opentvproject.github.io/opentv/) is a
-one-tap download. Or grab the APK straight from [Releases](../../releases).
+On a TV, the quickest route is the **[Downloader app](https://www.aftvnews.com/downloader/)**.
+The short code `6398449` always points at the newest **upstream** APK; this fork's own APKs are
+the ones in the releases above, and a short code for them belongs to whoever runs the fork. On a
+phone, the install page is a one-tap download.
 
 Every release is built by GitHub Actions from a tagged commit, and the workflow that built it
 is public — you can check the APK against the source, or rebuild it yourself, rather than
-trusting anyone's word.
+trusting anyone's word. The release notes name the exact tag the APK was built from, and the
+source of that tag is the corresponding source the GPL asks for.
 
 New to this? [SETUP.md](SETUP.md) walks through getting the repo, the install page and the
 first build running.
@@ -101,7 +112,7 @@ first build running.
 ## Build it yourself
 
 ```bash
-git clone https://github.com/opentvproject/opentv.git
+git clone https://github.com/T3lo5/opentv.git
 cd opentv
 ./gradlew assembleDebug
 ```
@@ -151,11 +162,41 @@ nobody is owed a feature for one, and nothing is gated behind one.
 
 ## Licence
 
-[GPL-3.0-or-later](LICENSE).
+**GPL-3.0-or-later** ([LICENSE](LICENSE)) — the SPDX identifier is `GPL-3.0-or-later`, which
+means version 3 of the GNU General Public License or any later version.
 
 Chosen deliberately. GPL means anyone can take this code, but if they ship it they must ship
 their source too. Nobody gets to close it, rebrand it, and sell a lifetime subscription on top
 of work the community did for free.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If
+not, see <https://www.gnu.org/licenses/>.
+
+### What a fork that ships builds has to do
+
+The GPL is not a formality here, and this repository is a fork that publishes APKs — so the
+obligations are live, not theoretical:
+
+- **The source of *this* build has to be reachable from the binary.** The "Source code" link on
+  the About screen points at this repository, and the release notes of every APK say which tag
+  it was built from. A fork that ships an APK and points at somebody else's repository has not
+  offered the corresponding source, and the copyleft has quietly stopped holding.
+- **The notices travel with the binary.** Every source file keeps its copyright header, the
+  licence text is in `LICENSE`, and the About screen carries the notice above.
+- **No additional restrictions.** GPL §10 forbids adding conditions to the source — no "not for
+  commercial use", no "do not fork", no NDA on the code.
+- **You may keep the licence, and you may charge for it.** Selling an APK is allowed. Shipping
+  it without the source is not.
+- **Using it privately costs you nothing.** The obligations are triggered by *distributing*.
+  Installing it on your own stick and keeping it to yourself needs no source release at all.
 
 ## Legal
 

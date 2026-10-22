@@ -8,6 +8,7 @@ package app.opentv.ui.channels
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
@@ -77,13 +79,19 @@ import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.Reminder
+import app.opentv.data.model.catchupCovers
 import app.opentv.data.model.shownName
+import app.opentv.data.parser.M3uCatchup
+import app.opentv.data.remote.XtreamApi
 import app.opentv.reminders.ReminderScheduler
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
+import app.opentv.ui.catchupUrl
+import app.opentv.ui.formatProgrammeTime
+import app.opentv.ui.formatTime
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -186,6 +194,45 @@ fun HomeScreen(
         }
     }
 
+    // The d-pad's up/down through the line-up, handled by hand — see [VerticalListFocus]. It
+    // owns the focus requesters for the rows, and it is what puts the focus on the first
+    // channel when the guide opens: with nothing focused a remote has nothing to press, which
+    // is how the guide ended up unreachable on a television.
+    val guideFocus = remember { VerticalListFocus() }
+    val guideScope = rememberCoroutineScope()
+    LaunchedEffect(guideScope) { guideFocus.attach(guideScope) }
+    var guideFocusPlaced by remember { mutableStateOf(false) }
+    // Choosing a folder from the rail lands the d-pad inside it: picking a category is the
+    // first half of "find me this channel", and walking what is in it is the second half. The
+    // rows for the new folder arrive a moment after the tap, so the focus waits for them —
+    // asking for it straight away would land it on the list being left behind.
+    var pendingFolderFocus by remember { mutableStateOf(false) }
+    var rowsAtFolderPick by remember { mutableStateOf<List<ChannelsViewModel.Row>?>(null) }
+    LaunchedEffect(rows, pendingFolderFocus) {
+        if (rows.isEmpty()) return@LaunchedEffect
+        guideFocus.update(rows.map { it.key })
+        if (!guideFocusPlaced) {
+            delay(80)
+            if (guideFocus.focusIndex(0)) guideFocusPlaced = true
+            return@LaunchedEffect
+        }
+        if (pendingFolderFocus) {
+            if (rowsAtFolderPick != null && rows == rowsAtFolderPick) return@LaunchedEffect
+            delay(80)
+            if (guideFocus.focusIndex(0)) {
+                pendingFolderFocus = false
+                rowsAtFolderPick = null
+            }
+            return@LaunchedEffect
+        }
+        // The rows were rebuilt — a catalogue or EPG sync lands, and the line-up is a new set
+        // of nodes. The row that had the focus went with the old ones, so the focus is put
+        // back where it was. Without this the viewer presses down and nothing happens,
+        // because there is no focus left to move.
+        delay(60)
+        guideFocus.lastFocusedKey?.let { guideFocus.focusKey(it) }
+    }
+
     // Re-evaluate "now" once a minute so progress bars advance without leaving the screen.
     LaunchedEffect(Unit) {
         while (true) {
@@ -272,6 +319,9 @@ fun HomeScreen(
     // While a recording is running the preview is silenced entirely: on a single-connection line a
     // muted preview is still a second stream, which fights the recording and risks a provider ban.
     val recordingActive = activeRecordings.isNotEmpty()
+    // The provider's user agent, for the request headers. Kept per source: a lookup for
+    // every channel the highlight passes over is a database query for every arrow press.
+    val sourceUserAgents = remember { HashMap<Long, String>() }
     LaunchedEffect(highlightedRow?.key, previewEnabled, screenResumed, recordingActive) {
         val row = highlightedRow
         if (!previewEnabled || !screenResumed || recordingActive || row == null) {
@@ -279,12 +329,15 @@ fun HomeScreen(
             return@LaunchedEffect
         }
         val channel = row.primary
-        val source = graph.sourceRepository.byId(channel.sourceId)
+        val userAgent = sourceUserAgents[channel.sourceId]
+            ?: graph.sourceRepository.byId(channel.sourceId)?.userAgent
+                ?.also { sourceUserAgents[channel.sourceId] = it }
+            ?: "OpenTV/0.1 (Android)"
         previewController.play(
             PlayerController.Request(
                 url = channel.streamUrl,
                 title = channel.shownName,
-                userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
+                userAgent = userAgent,
                 isLive = true,
             ),
             debounce = true,
@@ -349,7 +402,11 @@ fun HomeScreen(
                     RailEntry(
                         label = stringResource(R.string.guide_favourites),
                         selected = favouritesOnly,
-                        onClick = viewModel::selectFavourites,
+                        onClick = {
+                            viewModel.selectFavourites()
+                            pendingFolderFocus = true
+                            rowsAtFolderPick = rows
+                        },
                         modifier = if (favouritesOnly) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -358,7 +415,11 @@ fun HomeScreen(
                     RailEntry(
                         label = stringResource(R.string.guide_all_channels),
                         selected = allSelected,
-                        onClick = { viewModel.selectCategory(null) },
+                        onClick = {
+                            viewModel.selectCategory(null)
+                            pendingFolderFocus = true
+                            rowsAtFolderPick = rows
+                        },
                         modifier = if (allSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -367,7 +428,11 @@ fun HomeScreen(
                     RailEntry(
                         label = group.label,
                         selected = groupSelected,
-                        onClick = { viewModel.selectCategory(group.key) },
+                        onClick = {
+                            viewModel.selectCategory(group.key)
+                            pendingFolderFocus = true
+                            rowsAtFolderPick = rows
+                        },
                         modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -413,6 +478,7 @@ fun HomeScreen(
                 val dayLabel = when (guideDayOffset) {
                     0 -> stringResource(R.string.guide_today)
                     1 -> stringResource(R.string.guide_tomorrow)
+                    -1 -> stringResource(R.string.guide_yesterday)
                     else -> remember(windowStart) {
                         SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
                     }
@@ -429,7 +495,7 @@ fun HomeScreen(
                     } == true,
                     onRecord = { recordSelected() },
                     dayLabel = dayLabel,
-                    canGoPrevDay = guideDayOffset > 0,
+                    canGoPrevDay = guideDayOffset > -1,
                     onPrevDay = { viewModel.nudgeGuideDay(-1) },
                     onNextDay = { viewModel.nudgeGuideDay(1) },
                 )
@@ -448,20 +514,33 @@ fun HomeScreen(
                         false
                     }
                 }
-                if (channelLayout == AppSettings.ChannelLayout.LIST) {
+                // Which layout the line-up is drawn in.
+                //
+                // A phone follows the setting. A television draws the whole EPG as a grid when
+                // the viewer is looking at *everything*, and as a plain list inside a folder:
+                // inside a category the grid is a lot of sideways scrolling to answer a simple
+                // question — "what is in here?" — and the arrows end up walking a timeline
+                // instead of a list of channels.
+                val inFolder = selectedCategory != null || favouritesOnly
+                val listLayout = channelLayout == AppSettings.ChannelLayout.LIST ||
+                    (isTelevision && inFolder)
+                if (listLayout) {
                     ChannelList(
                         rows = rows,
+                        nowMillis = nowMillis,
                         selectedKey = highlightedRow?.key,
                         onSelectRow = { row -> channelMenu = row },
                         onFocusRow = onFocusChannel,
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                         onExitLeftFromChannel = onExitLeftChannel,
+                        vertical = guideFocus,
                         modifier = Modifier.weight(1f).padding(start = 12.dp, end = 12.dp),
                     )
                 } else {
                     GuideGrid(
                         rows = rows,
                         windowStartMillis = windowStart,
+                        nowMillis = nowMillis,
                         dayOffset = guideDayOffset,
                         selectedKey = highlightedRow?.key,
                         // OK on a channel opens its menu: Watch, Record now, Schedule a later show,
@@ -471,6 +550,7 @@ fun HomeScreen(
                         onProgramme = { row, programme -> recordTarget = row to programme },
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                         onExitLeftFromChannel = onExitLeftChannel,
+                        vertical = guideFocus,
                         modifier = Modifier.weight(1f).padding(start = 12.dp, end = 12.dp),
                     )
                 }
@@ -498,6 +578,13 @@ fun HomeScreen(
         }
         val liveNow = nowMillis in programme.startUtcMillis until programme.endUtcMillis
         val recordingThis = activeRecordings.firstOrNull { it.channelId == channel.id }
+        // The d-pad's first stop inside the dialog: its first action. A dialog opens its own
+        // window, and a window with nothing focused is a window the remote cannot drive.
+        val dialogFocus = remember { FocusRequester() }
+        LaunchedEffect(programme.id, programme.startUtcMillis) {
+            delay(80)
+            runCatching { dialogFocus.requestFocus() }
+        }
         Dialog(onDismissRequest = { recordTarget = null }) {
             Column(
                 Modifier
@@ -561,37 +648,79 @@ fun HomeScreen(
 
                 val isPast = programme.endUtcMillis <= nowMillis
                 when {
-                    liveNow && recordingThis != null -> RecordActionRow(stringResource(R.string.rec_stop_recording), primary = true) {
+                    liveNow && recordingThis != null -> RecordActionRow(
+                        label = stringResource(R.string.rec_stop_recording),
+                        primary = true,
+                        focusRequester = dialogFocus,
+                    ) {
                         graph.recordingEngine.stop(recordingThis.id)
                         Toast.makeText(context, context.getString(R.string.rec_recording_stopped), Toast.LENGTH_SHORT).show()
                         recordTarget = null
                     }
-                    liveNow -> RecordActionRow(stringResource(R.string.rec_record_now), primary = true) {
+                    liveNow -> RecordActionRow(
+                        label = stringResource(R.string.rec_record_now),
+                        primary = true,
+                        focusRequester = dialogFocus,
+                    ) {
                         recordScope.launch { graph.recordingEngine.startChannel(chosenVariant, programme) }
                         Toast.makeText(context, context.getString(R.string.rec_recording_channel, channel.shownName), Toast.LENGTH_LONG).show()
                         promptBackgroundIfNeeded()
                         recordTarget = null
                     }
                     // A finished programme on a catch-up channel plays back from the archive.
-                    isPast && channel.tvArchive -> RecordActionRow(stringResource(R.string.guide_watch_from_start), primary = true) {
-                        recordScope.launch {
-                            val source = graph.sourceRepository.byId(channel.sourceId)
-                            if (source == null) {
-                                Toast.makeText(context, context.getString(R.string.guide_catchup_link_failed), Toast.LENGTH_SHORT).show()
-                            } else {
-                                val mins = (programme.durationMillis / 60000).toInt().coerceAtLeast(1)
-                                val url = graph.xtreamApi.catchupUrl(source, channel.streamId, programme.startUtcMillis, mins)
-                                onPlayCatchup(
-                                    "catchup:${channel.id}:${programme.startUtcMillis}",
-                                    url,
-                                    "${channel.shownName} — ${programme.title}",
-                                    source.userAgent,
-                                )
+                    // Only when the archive still reaches that far back: a link the provider
+                    // answers with a 404 reads as a broken app, not as an archive that stops
+                    // seven days back.
+                    isPast && channel.tvArchive -> {
+                        if (channel.catchupCovers(programme.startUtcMillis, nowMillis)) {
+                            RecordActionRow(
+                                label = stringResource(R.string.guide_watch_from_start),
+                                primary = true,
+                                focusRequester = dialogFocus,
+                            ) {
+                                recordScope.launch {
+                                    val source = graph.sourceRepository.byId(channel.sourceId)
+                                    if (source == null) {
+                                        Toast.makeText(context, context.getString(R.string.guide_catchup_link_failed), Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        // Two ways to reach the archive: a playlist that describes its
+                                        // own catch-up gives a template, an Xtream login gives the
+                                        // account. Both end up in the same place.
+                                        val url = catchupUrl(
+                                            source = source,
+                                            channel = channel,
+                                            programme = programme,
+                                            nowUtcMillis = System.currentTimeMillis(),
+                                            xtreamApi = graph.xtreamApi,
+                                        )
+                                        if (url == null) {
+                                            Toast.makeText(context, context.getString(R.string.guide_catchup_link_failed), Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            onPlayCatchup(
+                                                "catchup:${channel.id}:${programme.startUtcMillis}",
+                                                url,
+                                                "${channel.shownName} — ${programme.title}",
+                                                source.userAgent,
+                                            )
+                                        }
+                                    }
+                                }
+                                recordTarget = null
                             }
+                        } else {
+                            InfoRow(
+                                stringResource(
+                                    R.string.guide_catchup_outside_window,
+                                    channel.tvArchiveDays,
+                                ),
+                            )
                         }
-                        recordTarget = null
                     }
-                    !isPast -> RecordActionRow(stringResource(R.string.rec_schedule_recording), primary = true) {
+                    !isPast -> RecordActionRow(
+                        label = stringResource(R.string.rec_schedule_recording),
+                        primary = true,
+                        focusRequester = dialogFocus,
+                    ) {
                         recordScope.launch { graph.recordingEngine.scheduleProgramme(chosenVariant, programme) }
                         Toast.makeText(context, context.getString(R.string.rec_scheduled_title, programme.title), Toast.LENGTH_LONG).show()
                         promptBackgroundIfNeeded()
@@ -632,13 +761,17 @@ fun HomeScreen(
                         }
                     }
                 }
-                RecordActionRow(stringResource(R.string.rec_record_series)) {
-                    recordScope.launch {
-                        graph.recordingEngine.recordSeries(channel, programme, targetRow.programmes)
+                // A series rule for a programme that has already aired would schedule a
+                // recording in the past, so the row only makes sense for what is still to come.
+                if (!isPast) {
+                    RecordActionRow(stringResource(R.string.rec_record_series)) {
+                        recordScope.launch {
+                            graph.recordingEngine.recordSeries(channel, programme, targetRow.programmes)
+                        }
+                        Toast.makeText(context, context.getString(R.string.rec_series_recording_set, programme.title), Toast.LENGTH_LONG).show()
+                        promptBackgroundIfNeeded()
+                        recordTarget = null
                     }
-                    Toast.makeText(context, context.getString(R.string.rec_series_recording_set, programme.title), Toast.LENGTH_LONG).show()
-                    promptBackgroundIfNeeded()
-                    recordTarget = null
                 }
                 RecordActionRow(stringResource(R.string.guide_watch_channel)) {
                     recordTarget = null
@@ -652,6 +785,12 @@ fun HomeScreen(
     // Single-connection guard: confirm before opening a live stream that would fight a recording.
     pendingLiveChannel?.let { liveChannel ->
         val recTitle = activeRecordings.firstOrNull()?.title.orEmpty()
+        // The d-pad's first stop inside the dialog: its first action.
+        val warnFocus = remember { FocusRequester() }
+        LaunchedEffect(liveChannel.id) {
+            delay(80)
+            runCatching { warnFocus.requestFocus() }
+        }
         Dialog(onDismissRequest = { pendingLiveChannel = null }) {
             Column(
                 Modifier
@@ -672,7 +811,10 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
-                RecordActionRow(stringResource(R.string.rec_live_warn_watch)) {
+                RecordActionRow(
+                    label = stringResource(R.string.rec_live_warn_watch),
+                    focusRequester = warnFocus,
+                ) {
                     pendingLiveChannel = null
                     activeRecordings.forEach { graph.recordingEngine.stop(it.id) }
                     startLive(liveChannel)
@@ -690,6 +832,21 @@ fun HomeScreen(
         val nowProg = menuRow.now
         val recordingThis = activeRecordings.firstOrNull { it.channelId == channel.id }
         val upcoming = menuRow.programmes.filter { it.startUtcMillis > nowMillis }.take(8)
+        // What the channel has already aired, and the provider still keeps. The guide grid
+        // starts at the current half-hour, so the past never reaches the screen on its own —
+        // without this list the catch-up button is a dead one.
+        var finished by remember(menuRow.key) { mutableStateOf<List<Programme>>(emptyList()) }
+        LaunchedEffect(menuRow.key) {
+            finished = viewModel.finishedProgrammes(menuRow, nowMillis)
+        }
+        // The d-pad's first stop inside the menu: the first action. A dialog opens its own
+        // window, and a window with nothing focused is a window the remote cannot drive —
+        // the arrows move nothing and OK does nothing.
+        val menuFocus = remember { FocusRequester() }
+        LaunchedEffect(menuRow.key) {
+            delay(80)
+            runCatching { menuFocus.requestFocus() }
+        }
         Dialog(onDismissRequest = { channelMenu = null }) {
             Column(
                 Modifier
@@ -720,7 +877,10 @@ fun HomeScreen(
                     Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    RecordActionRow(stringResource(R.string.guide_watch)) {
+                    RecordActionRow(
+                        label = stringResource(R.string.guide_watch),
+                        focusRequester = menuFocus,
+                    ) {
                         channelMenu = null
                         requestLive(channel)
                     }
@@ -767,6 +927,25 @@ fun HomeScreen(
                             Toast.makeText(context, context.getString(R.string.rec_series_recording_set, nowProg.title), Toast.LENGTH_LONG).show()
                             promptBackgroundIfNeeded()
                             channelMenu = null
+                        }
+                    }
+                    if (finished.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.guide_catchup_earlier),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                        finished.forEach { programme ->
+                            RecordActionRow(
+                                "${formatProgrammeTime(programme.startUtcMillis, nowMillis)}   ${programme.title}",
+                            ) {
+                                // The programme dialog, where the catch-up action lives — the same
+                                // place every other programme is handled from.
+                                channelMenu = null
+                                recordTarget = menuRow to programme
+                            }
                         }
                     }
                     if (upcoming.isNotEmpty()) {
@@ -827,8 +1006,32 @@ private suspend fun setReminder(
     ReminderScheduler.set(context, id, programme.startUtcMillis)
 }
 
+/**
+ * A row that says something rather than doing something.
+ *
+ * Used when an action exists but cannot be taken right now — a programme older than the
+ * provider's archive. It reads as text, not as a button, so nobody taps it and waits for a
+ * player that is never going to come.
+ */
 @Composable
-private fun RecordActionRow(label: String, primary: Boolean = false, onClick: () -> Unit) {
+private fun InfoRow(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun RecordActionRow(
+    label: String,
+    primary: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val bg = when {
         focused -> MaterialTheme.colorScheme.primary
@@ -848,10 +1051,14 @@ private fun RecordActionRow(label: String, primary: Boolean = false, onClick: ()
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
+            // Focusable, or the menu is a dead end on a television: a clickable row is not a
+            // focus target, so the arrows could not reach "Watch" and OK had nothing to press.
             .clickable(onClick = onClick)
+            .focusable()
             .padding(horizontal = 16.dp, vertical = 12.dp),
     )
 }
@@ -880,17 +1087,20 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .clickable(onClick = onClick)
+            .focusable()
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
 }
 
 @Composable
 private fun RailEntry(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
     Text(
         text = label,
         style = MaterialTheme.typography.titleMedium,
         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        color = if (focused) MaterialTheme.colorScheme.onPrimary
+        else if (selected) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -898,10 +1108,18 @@ private fun RailEntry(label: String, selected: Boolean, onClick: () -> Unit, mod
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
+                when {
+                    focused -> MaterialTheme.colorScheme.primary
+                    selected -> MaterialTheme.colorScheme.primaryContainer
+                    else -> MaterialTheme.colorScheme.surface
+                },
             )
+            .onFocusChanged { focused = it.isFocused }
+            // Focusable, or the category rail is decoration on a television: a clickable row is
+            // not a focus target, so the arrows walked past every category and the folders
+            // could not be opened at all.
             .clickable(onClick = onClick)
+            .focusable()
             .padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }
@@ -1100,6 +1318,6 @@ private fun EmptyState(onAddSource: () -> Unit) {
 }
 
 /** UTC in the database, device zone on screen. Converted here and nowhere else. */
-private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-private fun formatTime(utcMillis: Long): String = timeFormat.format(Date(utcMillis))
+
+

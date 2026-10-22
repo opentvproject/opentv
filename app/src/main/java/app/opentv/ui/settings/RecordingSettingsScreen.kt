@@ -413,8 +413,12 @@ private fun StepButton(icon: androidx.compose.ui.graphics.vector.ImageVector, en
             .size(40.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
-            .focusable()
-            .clickable(enabled = enabled, onClick = onClick),
+            // The clickable first, then the focusable: Compose finds the key handler of a
+            // focused element by walking the chain and stopping at the first focus target,
+            // so a focusable() in front of the clickable hides its own handling — and OK
+            // stops working on the stepper.
+            .clickable(enabled = enabled, onClick = onClick)
+            .focusable(),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = if (enabled) fg else fg.copy(alpha = 0.4f))

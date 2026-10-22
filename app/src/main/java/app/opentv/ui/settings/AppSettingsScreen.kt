@@ -40,11 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import android.content.Context
 import android.widget.Toast
 import app.opentv.R
 import app.opentv.core.AppSettings
+import app.opentv.core.BufferPreset
+import app.opentv.core.DecoderPreference
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.data.work.SyncWorker
@@ -59,10 +62,13 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { AppSettings.get(context) }
     val themeMode by settings.themeMode.collectAsState()
+    val appMode by settings.appMode.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
+    val decoder by settings.decoderPreference.collectAsState()
+    val guideHistory by settings.guideHistory.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
     val language by settings.languageTag.collectAsState()
     val liveEnabled by settings.liveEnabled.collectAsState()
@@ -91,6 +97,27 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
+
+        // The mode comes first: it decides how everything else is drawn, so it is the one
+        // setting worth finding before the rest.
+        SettingsSection(stringResource(R.string.settings_section_mode)) {
+            ThemeOption(
+                stringResource(R.string.settings_mode_tv),
+                appMode == AppSettings.AppMode.TV,
+            ) { settings.setAppMode(AppSettings.AppMode.TV) }
+            ThemeOption(
+                stringResource(R.string.settings_mode_phone),
+                appMode == AppSettings.AppMode.PHONE,
+            ) { settings.setAppMode(AppSettings.AppMode.PHONE) }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.settings_mode_note),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
 
         SettingsSection(stringResource(R.string.settings_appearance)) {
             ThemeOption(stringResource(R.string.settings_theme_system), themeMode == AppSettings.ThemeMode.SYSTEM) {
@@ -188,6 +215,28 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 checked = previewSound,
                 onToggle = settings::setGuidePreviewSound,
             )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.settings_guide_history_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            AppSettings.GuideHistory.entries.forEach { option ->
+                ThemeOption(
+                    stringResource(
+                        when (option) {
+                            AppSettings.GuideHistory.ONE_DAY -> R.string.settings_guide_history_one
+                            AppSettings.GuideHistory.THREE_DAYS -> R.string.settings_guide_history_three
+                            AppSettings.GuideHistory.SEVEN_DAYS -> R.string.settings_guide_history_seven
+                        },
+                    ),
+                    guideHistory == option,
+                ) { settings.setGuideHistory(option) }
+            }
+            Text(
+                stringResource(R.string.settings_guide_history_note),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -205,6 +254,19 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 checked = resumeLast,
                 onToggle = settings::setResumeLastChannel,
             )
+            Spacer(Modifier.height(8.dp))
+            BufferPresetSection(settings)
+            Spacer(Modifier.height(8.dp))
+            ToggleRow(
+                title = stringResource(R.string.settings_decoder_title),
+                subtitle = stringResource(R.string.settings_decoder_subtitle),
+                checked = decoder == DecoderPreference.SOFTWARE_FIRST,
+                onToggle = { enabled ->
+                    settings.setDecoderPreference(
+                        if (enabled) DecoderPreference.SOFTWARE_FIRST else DecoderPreference.AUTO,
+                    )
+                },
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -215,6 +277,52 @@ fun AppSettingsScreen(onBack: () -> Unit) {
 
         SleepTimerSection()
     }
+}
+
+/**
+ * How much video the player keeps buffered.
+ *
+ * A radio list rather than a slider: the useful answers are a handful of shapes, not a
+ * number, and a number would invite a setting nobody can reason about ("47 seconds" is
+ * not a decision anybody makes).
+ */
+@Composable
+private fun BufferPresetSection(settings: AppSettings) {
+    val preset by settings.bufferPreset.collectAsState()
+
+    Text(
+        stringResource(R.string.settings_buffer_title),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    BufferPreset.entries.forEach { option ->
+        val label = when (option) {
+            BufferPreset.DEFAULT -> R.string.settings_buffer_default
+            BufferPreset.SMALL -> R.string.settings_buffer_small
+            BufferPreset.MEDIUM -> R.string.settings_buffer_medium
+            BufferPreset.LARGE -> R.string.settings_buffer_large
+            BufferPreset.EXTRA_LARGE -> R.string.settings_buffer_extra_large
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .selectable(
+                    selected = preset == option,
+                    role = Role.RadioButton,
+                    onClick = { settings.setBufferPreset(option) },
+                )
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = preset == option, onClick = null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(label), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+    Text(
+        stringResource(R.string.settings_buffer_note),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**

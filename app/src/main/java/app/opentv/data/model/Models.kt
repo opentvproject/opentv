@@ -65,6 +65,19 @@ data class Source(
     /** Optional explicit XMLTV URL. For Xtream this is derived if left null. */
     val epgUrl: String? = null,
     /**
+     * The provider's own timezone, e.g. `Europe/Paris` — what the provider's clock says.
+     *
+     * The Xtream timeshift endpoint names the archive file after the panel's local time
+     * (`/tv_archive/{stream_id}/YYYY-MM-DD:HH-mm.ts`), so a catch-up URL has to carry the
+     * panel's clock, not the device's. A phone in São Paulo asking a Paris panel for
+     * "19:00" gets a recording from three hours earlier.
+     *
+     * Read from the panel's `server_info` at login and kept. Null means "not known", and
+     * the device's own zone is used — which is right whenever the two happen to agree.
+     * A plain M3U playlist has no panel to ask, so this is set by hand there.
+     */
+    val timezone: String? = null,
+    /**
      * Some panels reject requests whose User-Agent they do not recognise, which is the
      * usual cause of a blanket 403 on every stream. Overridable per source.
      */
@@ -136,6 +149,20 @@ data class Channel(
     /** Whether the provider offers catch-up/archive on this channel, and how many days back. */
     @ColumnInfo(defaultValue = "0") val tvArchive: Boolean = false,
     @ColumnInfo(defaultValue = "0") val tvArchiveDays: Int = 0,
+    /**
+     * Catch-up template with its `{...}` tokens still in it, for providers that describe the
+     * archive on the playlist itself (`catchup-source`) instead of through an Xtream login. Null
+     * for both of the other cases: an Xtream channel, whose URL is built from the credentials at
+     * play time, and a channel with no catch-up at all.
+     */
+    val catchupSource: String? = null,
+    /** The playlist's `catchup` tag (`default`, `append`, `shift`, `xc`...). Kept for the log. */
+    val catchupMode: String? = null,
+    /**
+     * The provider's own time correction, in seconds — `catchup-correction` on the playlist, which
+     * is written in hours there. Only ever applied to the catch-up URL, never to the guide.
+     */
+    @ColumnInfo(defaultValue = "0") val catchupCorrectionSecs: Int = 0,
     val number: Int?,
     /** Fully-resolved playback URL. For Stalker channels this is a placeholder; [cmd] is resolved
      *  to the real URL on demand at play time (see [SourceKind.STALKER]). */
@@ -174,6 +201,26 @@ data class Channel(
 
 /** What the UI should show for a channel: the user's rename if set, else the cleaned display name. */
 val Channel.shownName: String get() = customName?.takeIf { it.isNotBlank() } ?: displayName
+
+/**
+ * Whether the provider still holds this programme in its archive.
+ *
+ * [tvArchiveDays] is how far back the archive reaches. Zero means the provider never said
+ * — which is not the same as "there is no archive" — so only a stated depth can rule a
+ * programme out, and a negative depth (the playlist's "the whole archive") rules nothing
+ * out.
+ *
+ * The alternative is offering a catch-up link the provider will answer with a 404, which
+ * reads as a broken app rather than as an archive that does not go back that far.
+ */
+fun Channel.catchupCovers(startUtcMillis: Long, nowUtcMillis: Long): Boolean {
+    if (!tvArchive) return false
+    if (tvArchiveDays <= 0) return true
+    val age = nowUtcMillis - startUtcMillis
+    return age <= tvArchiveDays * MILLIS_PER_DAY
+}
+
+private const val MILLIS_PER_DAY = 24L * 60L * 60L * 1000L
 
 /**
  * One guide feed: where XMLTV comes from.

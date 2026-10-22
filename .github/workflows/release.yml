@@ -73,6 +73,11 @@ jobs:
             echo ""
             echo "---"
             echo "Built by GitHub Actions from the tagged commit — the workflow is public, so anyone can verify this APK against the source."
+            echo ""
+            echo "OpenTV is free software, licensed under the GNU General Public License v3.0 or later."
+            echo "The complete corresponding source for this build is at https://github.com/${{ github.repository }} — the tag ${GITHUB_REF_NAME} is the exact commit this APK was built from."
+            echo ""
+            echo "This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See https://www.gnu.org/licenses/ for more details."
           } >> release-notes.md
 
       - name: Publish release

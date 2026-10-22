@@ -39,12 +39,16 @@ object M3uParser {
     fun parse(reader: BufferedReader, sourceId: Long): Result {
         val channels = ArrayList<Channel>()
         val seenStreamIds = HashSet<String>()
+        val seenIdentities = HashSet<String>()
         var declaredEpgUrl: String? = null
         var skipped = 0
 
         var pendingName: String? = null
         var pendingAttributes: Map<String, String> = emptyMap()
         var pendingNumber: Int? = null
+        var pendingCatchup: CatchupTags? = null
+        // Playlist-wide catch-up defaults, from the #EXTM3U header (Kodi reads them there too).
+        var catchupDefaults = CatchupDefaults()
         // #EXTVLCOPT / #EXTHTTP lines that apply to the next URL.
         var index = 0
 
@@ -58,12 +62,14 @@ object M3uParser {
                     declaredEpgUrl = attributes["url-tvg"]
                         ?: attributes["x-tvg-url"]
                         ?: declaredEpgUrl
+                    catchupDefaults = catchupDefaults.mergedWith(catchupDefaultsOf(attributes))
                 }
 
                 line.startsWith("#EXTINF", ignoreCase = true) -> {
                     pendingAttributes = parseAttributes(line)
                     pendingName = displayNameOf(line, pendingAttributes)
                     pendingNumber = pendingAttributes["tvg-chno"]?.toIntOrNull()
+                    pendingCatchup = catchupTagsOf(pendingAttributes, catchupDefaults)
                 }
 
                 // Any other directive: ignore, but keep the pending EXTINF alive.
@@ -76,23 +82,56 @@ object M3uParser {
                         skipped++
                     } else {
                         val attributes = pendingAttributes
-                        val streamId = attributes["tvg-id"]
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { "tvg:$it" }
-                            ?: "url:${stableHash(line)}"
+                        val tvgId = attributes["tvg-id"]?.takeIf { it.isNotBlank() }
+                        val categoryId = attributes["group-title"]?.takeIf { it.isNotBlank() }
 
-                        // Providers repeat the same tvg-id across quality variants. Keep the
-                        // first and drop later duplicates rather than letting them collide on
-                        // the unique index and abort the whole import.
-                        if (seenStreamIds.add(streamId)) {
+                        val streamId = when {
+                            tvgId == null -> {
+                                // No id: the URL is the identity.
+                                val candidate = "url:${stableHash(line)}"
+                                candidate.takeIf { seenStreamIds.add(it) }
+                            }
+
+                            else -> {
+                                // A tvg-id identifies a channel to the *guide*, not a stream:
+                                // providers use one id for every quality variant of a channel,
+                                // and sometimes for two different channels as well. Deduplicating
+                                // on the id alone threw those away — the user's list came out
+                                // shorter than everyone else's, and the quality switch had
+                                // nothing to switch between.
+                                val identity = identityOf(tvgId, name, categoryId)
+                                if (seenIdentities.add(identity)) {
+                                    // The first entry with a given id keeps the plain id, so the
+                                    // favourites, renames and guide matches a user already has
+                                    // survive the change.
+                                    val plain = "tvg:$tvgId"
+                                    if (seenStreamIds.add(plain)) plain
+                                    else "tvg:$tvgId:${stableHash(identity)}"
+                                } else {
+                                    // The same channel, at the same quality, listed twice.
+                                    null
+                                }
+                            }
+                        }
+
+                        if (streamId != null) {
+                            val tags = pendingCatchup
+                            val catchupSource = tags?.let {
+                                M3uCatchup.sourceFor(it.mode, it.declaredSource, line, flussonicTs = it.tsStream)
+                            }
                             channels += Channel(
                                 sourceId = sourceId,
                                 streamId = streamId,
                                 name = name,
-                                categoryId = attributes["group-title"]?.takeIf { it.isNotBlank() },
+                                categoryId = categoryId,
                                 logoUrl = (attributes["tvg-logo"] ?: attributes["logo"])
                                     ?.takeIf { it.isNotBlank() },
-                                epgChannelId = attributes["tvg-id"]?.takeIf { it.isNotBlank() },
+                                epgChannelId = tvgId,
+                                tvArchive = catchupSource != null,
+                                tvArchiveDays = tags?.days ?: 0,
+                                catchupSource = catchupSource,
+                                catchupMode = tags?.mode?.tag?.takeIf { catchupSource != null },
+                                catchupCorrectionSecs = tags?.correctionSecs ?: 0,
                                 number = pendingNumber,
                                 streamUrl = line,
                                 sortIndex = index++,
@@ -102,11 +141,30 @@ object M3uParser {
                     pendingName = null
                     pendingAttributes = emptyMap()
                     pendingNumber = null
+                    pendingCatchup = null
                 }
             }
         }
 
         return Result(channels, declaredEpgUrl, skipped)
+    }
+
+    /**
+     * The identity of a *stream*: which channel, at which quality, in which category.
+     *
+     * A tvg-id alone is not that. The guide's id is a channel's name in the provider's
+     * catalogue, and providers reuse it — for every quality tier of a channel, for the same
+     * channel listed in two categories, and sometimes for two channels that have nothing to
+     * do with each other. Two entries that share an id are only the same stream when they
+     * are also the same channel at the same quality, and that is what this says.
+     *
+     * The parts are the ones the app already uses to decide that two rows are the same
+     * channel: the normalised name and the quality label. A stable hash of the result goes
+     * into the stream id, so a user's favourites and renames survive a refresh.
+     */
+    private fun identityOf(tvgId: String, name: String, categoryId: String?): String {
+        val normalized = ChannelNameNormalizer.normalize(name)
+        return "$tvgId|${normalized.groupKey}|${normalized.qualityLabel.lowercase()}|${categoryId.orEmpty()}"
     }
 
     /**

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,9 +42,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -58,9 +62,95 @@ import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
 import app.opentv.ui.ChannelsViewModel
 import coil.compose.AsyncImage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * The d-pad's up/down through a list, done by hand.
+ *
+ * Compose's own 2-D focus search does not walk this screen's list. The search gathers the
+ * *shallowest* focus targets in the tree, and on the home screen that is the preview pane
+ * above the guide — so the arrows walked the preview, stopped dead at the guide's first row,
+ * and never got to the channel below it. The viewer pressed down and nothing happened, which
+ * is the whole difference between a guide you can browse and a picture of one.
+ *
+ * So the rows are asked directly: up/down means "the row above / the row below", which is what
+ * a television guide means by it. Left/right are left to Compose — moving along the time-line
+ * and in and out of the channel column works there.
+ *
+ * One requester per row, owned here: a requester is bound to the node it is attached to, so
+ * handing the same one to a different row (as happens when a lazy list recycles its first
+ * item) would break it.
+ *
+ * Stable, and deliberately so. The rows' focus callbacks capture this object, and a lambda
+ * that captures an unstable value is a *new* lambda on every recomposition — which is a
+ * changed parameter, which is a row that has to be redone. With this marked stable the
+ * compiler can remember those callbacks, the rows' parameters stay equal, and moving the
+ * d-pad redraws the two rows that changed instead of every programme block on screen.
+ *
+ * Nothing here is Compose state: it is a controller the guide owns, and the requesters it
+ * hands out are bound to the rows they belong to.
+ */
+@androidx.compose.runtime.Stable
+class VerticalListFocus {
+    private var keys: List<Any> = emptyList()
+    private val requesters = mutableMapOf<Any, FocusRequester>()
+    private var focusedKey: Any? = null
+    private var scope: CoroutineScope? = null
+
+    fun attach(scope: CoroutineScope) { this.scope = scope }
+
+    /** The list the controller walks. */
+    fun update(keys: List<Any>) { this.keys = keys }
+
+    /** The row the focus is on, by key. */
+    fun onRowFocused(key: Any) { focusedKey = key }
+
+    /**
+     * The row the focus was last on.
+     *
+     * Kept so a rebuilt list can put the focus back where it was: when the rows are replaced
+     * (a catalogue or EPG sync lands), the row that had the focus is a *new* node, and the
+     * focus goes down with the old one. Without this the viewer presses down and nothing
+     * happens, because there is no focus left to move.
+     */
+    val lastFocusedKey: Any? get() = focusedKey
+
+    /** The requester for a row, made on first sight. */
+    fun requesterFor(key: Any): FocusRequester = requesters.getOrPut(key) { FocusRequester() }
+
+    /** Puts the focus on the row with the given key. */
+    fun focusKey(key: Any): Boolean {
+        val requester = requesters[key] ?: return false
+        val scope = scope ?: return false
+        scope.launch { runCatching { requester.requestFocus() } }
+        return true
+    }
+
+    /** Puts the focus on the row at the given index. */
+    fun focusIndex(index: Int): Boolean {
+        val key = keys.getOrNull(index) ?: return false
+        return focusKey(key)
+    }
+
+    /** Handles up/down. Returns true when the key was consumed. */
+    fun handle(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val delta = when (event.key) {
+            Key.DirectionDown -> 1
+            Key.DirectionUp -> -1
+            else -> return false
+        }
+        val key = focusedKey ?: return false
+        val index = keys.indexOf(key)
+        if (index < 0) return false
+        val target = keys.getOrNull(index + delta) ?: return false
+        return focusKey(target)
+    }
+}
 
 /**
  * The programme guide: channels down the left, a scrolling time-line to the right, with
@@ -80,6 +170,17 @@ import java.util.Locale
 fun GuideGrid(
     rows: List<ChannelsViewModel.Row>,
     windowStartMillis: Long,
+    /**
+     * "Now", from the screen's clock.
+     *
+     * Passed in rather than read here on purpose. A fresh `System.currentTimeMillis()` on
+     * every recomposition changes the value on every arrow press, and a changed parameter
+     * is a changed parameter: Compose has to redo every visible row and every programme
+     * block in it, which is the difference between the guide following the d-pad and the
+     * guide stuttering under it. The host's clock ticks once a minute, which is the
+     * resolution a progress bar needs anyway.
+     */
+    nowMillis: Long,
     selectedKey: Any?,
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
@@ -89,15 +190,20 @@ fun GuideGrid(
     // left-navigation carry focus into the already-visible rail.
     onExitLeftFromChannel: () -> Boolean = { false },
     dayOffset: Int = 0,
+    // The d-pad's up/down, handled by hand — see [VerticalListFocus].
+    vertical: VerticalListFocus,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
-    val now = System.currentTimeMillis()
     // Jumping to another day resets the horizontal scroll to that day's start; a within-day time
     // drift (dayOffset unchanged) leaves the user's scroll position untouched.
     androidx.compose.runtime.LaunchedEffect(dayOffset) { scroll.scrollTo(0) }
 
-    Column(modifier.fillMaxSize()) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event -> vertical.handle(event) },
+    ) {
         // No pager buttons: the programme blocks are d-pad focusable, so moving right along a row
         // scrolls the whole timeline (header and every row in lock-step) on its own.
         TimeHeader(windowStartMillis, scroll)
@@ -106,18 +212,19 @@ fun GuideGrid(
             contentPadding = PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            items(rows, key = { it.key }) { row ->
+            itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                 GuideRow(
                     row = row,
                     windowStartMillis = windowStartMillis,
-                    nowMillis = now,
+                    nowMillis = nowMillis,
                     scroll = scroll,
                     isSelected = row.key == selectedKey,
                     onSelect = { onSelectRow(row) },
-                    onFocus = { onFocusRow(row) },
+                    onFocus = { vertical.onRowFocused(row.key); onFocusRow(row) },
                     onProgramme = { programme -> onProgramme(row, programme) },
                     onToggleFavourite = { onToggleFavourite(row) },
                     onExitLeft = onExitLeftFromChannel,
+                    focusRequester = vertical.requesterFor(row.key),
                 )
             }
         }
@@ -134,28 +241,33 @@ fun GuideGrid(
 @Composable
 fun ChannelList(
     rows: List<ChannelsViewModel.Row>,
+    /** "Now", from the screen's clock — see [GuideGrid]. */
+    nowMillis: Long,
     selectedKey: Any?,
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
     onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
     onExitLeftFromChannel: () -> Boolean = { false },
+    vertical: VerticalListFocus,
     modifier: Modifier = Modifier,
 ) {
-    val now = System.currentTimeMillis()
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event -> vertical.handle(event) },
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        items(rows, key = { it.key }) { row ->
+        itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
             ChannelListRow(
                 row = row,
-                nowMillis = now,
+                nowMillis = nowMillis,
                 isSelected = row.key == selectedKey,
                 onSelect = { onSelectRow(row) },
-                onFocus = { onFocusRow(row) },
+                onFocus = { vertical.onRowFocused(row.key); onFocusRow(row) },
                 onToggleFavourite = { onToggleFavourite(row) },
                 onExitLeft = onExitLeftFromChannel,
+                focusRequester = vertical.requesterFor(row.key),
             )
         }
     }
@@ -170,11 +282,13 @@ private fun ChannelListRow(
     onFocus: () -> Unit,
     onToggleFavourite: () -> Unit,
     onExitLeft: () -> Boolean,
+    focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer
@@ -192,7 +306,10 @@ private fun ChannelListRow(
                 focused = it.isFocused
                 if (it.isFocused) onFocus()
             }
+            // Focusable: a clickable row is not a focus target, so on a television the arrows
+            // walked straight past every channel and OK had nothing to press.
             .clickable(onClick = onSelect)
+            .focusable()
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -320,6 +437,7 @@ private fun GuideRow(
     onProgramme: (Programme) -> Unit,
     onToggleFavourite: () -> Unit = {},
     onExitLeft: () -> Boolean = { false },
+    focusRequester: FocusRequester? = null,
 ) {
     // Focus (the d-pad border) just moves the highlight. Selection (the filled cell) is the
     // channel the preview is playing — it only changes when you press OK.
@@ -332,6 +450,7 @@ private fun GuideRow(
             Modifier
                 .width(CHANNEL_COLUMN)
                 .fillMaxSize()
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (isSelected) MaterialTheme.colorScheme.primaryContainer
@@ -353,7 +472,11 @@ private fun GuideRow(
                     focused = it.isFocused
                     if (it.isFocused) onFocus()
                 }
+                // Focusable, or the channel column is decoration on a television: the arrows
+                // could not reach a channel, so OK — which is "watch this channel" in the
+                // player and "open this channel's menu" on the home screen — never happened.
                 .clickable(onClick = onSelect)
+                .focusable()
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -490,8 +613,8 @@ private fun ProgrammeBlock(title: String, width: Dp, isNow: Boolean, progress: F
                 ) else Modifier,
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .focusable(),
     ) {
         Text(
             title,

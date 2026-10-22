@@ -168,6 +168,74 @@ of real panel responses to test against.
 Similarly, `syncXtream` treats VOD as optional: plenty of accounts are live-TV only, and a 404
 on `get_vod_streams` must never cost the user their channel list.
 
+## One APK, two surfaces
+
+Android TV, Fire TV, a phone and a tablet all run the same build. The device usually says
+which it is — `UI_MODE_TYPE_TELEVISION`, the leanback feature — but not reliably: a Google TV
+stick that reports a phone profile is a real thing, and so is a phone on a wall-mounted screen.
+Guessing wrong is expensive, because the two surfaces want opposite things.
+
+So the app asks, once, and remembers the answer: `AppSettings.AppMode`. Until it is answered,
+the device's own opinion stands. The mode is asked on the first-run screen and changeable in
+Settings → Display & playback, and the layout follows the mode, not the hardware.
+
+In TV mode: a category opens as a plain list rather than the EPG timeline (a folder answers
+"what is in here?" — a grid answers it with sideways scrolling), and the app does not hold the
+picture awake, so the set's own screensaver takes over. The channel stops with the picture and
+starts again when the viewer comes back: a television that keeps talking to an empty room is
+not a television. Stopping it for good is the player's **Turn off** button, which stops the
+stream, closes the app and leaves a one-shot bookmark, so opening the app again finds the
+channel you were on.
+
+### A clickable row is not a focus target
+
+The single most expensive bug in this app's history was not a crash but a row that could not be
+reached.
+
+`Modifier.clickable` gives a row its tap behaviour and its semantics. It does **not** make it
+focusable. On a television, where a remote is the only input, that difference is the whole
+interface: the d-pad walks the focus tree, and a row that is not in it does not exist. The
+category rail, the transport bar, the channel column of the guide and every row of every menu
+were all invisible to the arrow keys — the only thing OK could press was whatever happened to
+hold the focus, which was play/pause. Users described the symptom as "the buttons don't work" and
+"OK pauses the channel".
+
+The rule that follows: anything meant to be pressed with a remote needs `focusable()` as well
+as `clickable()`, and something has to ask for the focus when the screen opens, or the d-pad
+has nothing to land on.
+
+### And focusable() goes *after* clickable()
+
+The order of the two modifiers is not a style question. Compose finds the key handler of a
+focused element by walking the modifier chain and stopping at the **first focus target** — so a
+chain of `focusable().clickable()` hides the clickable's own key handling, and pressing OK on
+that element does nothing at all. The chain has to be `clickable().focusable()`.
+
+The same walk explains why the up/down arrows did not walk a list of channels: Compose's 2-D
+focus search gathers the *shallowest* focus targets in the tree, and on the home screen that is
+the preview pane above the guide. The arrows walked the preview and stopped dead at the guide's
+first row. So the rows are asked directly instead — see `VerticalListFocus`.
+
+### And a button's chain must not change under it
+
+A focus target is bound to the node it is attached to, and a node is bound to its place in the
+modifier chain. So a chain that *changes* while the element holds the focus takes the focus with
+it.
+
+The transport bar drew a border around the focused chip by **adding** a `border` modifier when the
+chip gained the focus and removing it when the chip lost it. Every chip that was there from the
+start (guide, channels, pause, subtitles) kept working; every chip that arrived later — rewind,
+forward, quality, all of them conditional on the guide catching up — was a picture to the arrows.
+The same chip, walked past, in a bar where every other button could be reached.
+
+The fix is to draw the border rather than add it: `border` is always in the chain, transparent
+when the chip is not focused. The chain is then the same shape whatever the state, and the focus
+target stays where it is.
+
+The general rule: a row that holds the focus must not change its modifier chain. If a state has
+to change something about the row, change the *values* of modifiers that are always there, not
+the set of them.
+
 ## Dependency injection
 
 `ServiceLocator` is a hand-rolled container. Hilt is the conventional choice and is
@@ -182,6 +250,16 @@ The parsers are pure functions over strings and streams, which makes them cheap 
 exhaustively — and they are where the bugs that ruin someone's evening actually live. Every
 malformed case in `M3uParserTest` is something that should cost the user one channel, never the
 whole playlist.
+
+The Room migrations are covered the same way. `DatabaseMigrationTest` creates the oldest
+schema the app ever shipped (version 2) with the data a user would miss if the upgrade wiped
+it — a source, a favourite channel, a programme — migrates it all the way to the current
+version, and checks both that the data survived and that the result matches the exported
+schema exactly. A mistyped `ALTER TABLE` would otherwise be found on a user's device, where
+the fix is `fallbackToDestructiveMigration`: the database rebuilt from nothing, with every
+favourite and every recording gone. The test needs the exported schemas as assets, so they
+are added to the **debug** variant only — the release APK has no reason to carry 460 KB of
+schema history.
 
 Things worth testing that are not yet covered, and would be very welcome contributions:
 

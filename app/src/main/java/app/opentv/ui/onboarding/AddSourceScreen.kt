@@ -6,6 +6,7 @@
 package app.opentv.ui.onboarding
 
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,9 +46,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
-import app.opentv.isRunningOnTelevision
 import app.opentv.ui.SourcesViewModel
 import app.opentv.ui.channels.readClipboardText
 
@@ -73,10 +75,25 @@ fun AddSourceScreen(
     // scanned BY a phone, which is nonsensical and traps the user — so a non-TV device defaults
     // straight to the direct entry form. On a TV the QR is still offered first, because typing a
     // server address and password with a d-pad is the worst moment in every app of this kind.
-    val isTelevision = remember(context) { isRunningOnTelevision(context) }
+    //
+    // "A TV" is the mode the user picked, not the device's guess: the mode is asked on this
+    // screen, and the pairing screen follows the answer rather than the hardware.
+    val settings = remember { AppSettings.get(context) }
+    val appMode by settings.appMode.collectAsState()
+    val isTelevision = appMode == AppSettings.AppMode.TV
     // Editing an existing provider always uses the direct form (the fields are pre-filled, and there
     // is nothing to pair); only a fresh add on a TV offers the phone-pairing QR first.
     var usePhone by remember { mutableStateOf(isTelevision && editingSourceId == null) }
+    // Changing the mode here moves the screen with it: picking "phone" leaves the pairing
+    // screen for the direct form, picking "TV" goes back to the QR. Only on a change — the
+    // "type it here" button must not bounce the viewer back into the pairing screen.
+    var modeAtEntry by remember { mutableStateOf(appMode) }
+    LaunchedEffect(appMode) {
+        if (appMode != modeAtEntry) {
+            modeAtEntry = appMode
+            usePhone = appMode == AppSettings.AppMode.TV && editingSourceId == null
+        }
+    }
 
     if (usePhone) {
         PhonePairingScreen(
@@ -106,6 +123,7 @@ fun AddSourceScreen(
     var epgUrl by remember(existing?.id) { mutableStateOf(existing?.epgUrl ?: "") }
     var showAdvanced by remember { mutableStateOf(false) }
     var userAgent by remember(existing?.id) { mutableStateOf(existing?.userAgent ?: Source.DEFAULT_USER_AGENT) }
+    var timezone by remember(existing?.id) { mutableStateOf(existing?.timezone ?: "") }
 
     // Editing copies onto the existing row, so id, enabled state, live format and last-sync stamp
     // are preserved; a fresh add starts from a blank Source (id 0, so save() inserts).
@@ -121,6 +139,7 @@ fun AddSourceScreen(
         macAddress = mac.takeIf { it.isNotBlank() },
         epgUrl = epgUrl.takeIf { it.isNotBlank() },
         userAgent = userAgent.ifBlank { Source.DEFAULT_USER_AGENT },
+        timezone = timezone.takeIf { it.isNotBlank() },
     )
 
     val canSubmit = url.isNotBlank() && when (kind) {
@@ -153,7 +172,24 @@ fun AddSourceScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // The mode, asked once and up front — it decides how the whole app behaves, so it
+            // is worth asking before anything is typed. Skipped when editing a provider: by
+            // then the mode is already known.
+            if (editingSourceId == null) {
+                ModeSelector(
+                    mode = appMode,
+                    onSelect = { settings.setAppMode(it) },
+                )
+                Spacer(Modifier.height(20.dp))
+            }
+
+            // The three provider names are long, and a phone in portrait has not the width
+            // for all three: the last one used to be squeezed into a column of letters.
+            // Scrolling the row sideways is the same answer the player's transport row got.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
                 FilterChip(
                     selected = kind == SourceKind.XTREAM,
                     onClick = { kind = SourceKind.XTREAM },
@@ -269,6 +305,17 @@ fun AddSourceScreen(
                     label = { Text("User-Agent") },
                     supportingText = {
                         Text(stringResource(R.string.onboarding_user_agent_help))
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = timezone,
+                    onValueChange = { timezone = it },
+                    label = { Text(stringResource(R.string.onboarding_timezone_optional)) },
+                    supportingText = {
+                        Text(stringResource(R.string.onboarding_timezone_help))
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

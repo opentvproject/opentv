@@ -1,5 +1,130 @@
 # Changelog
 
+## 0.12.4
+
+- **The source code link points at this build.** The About screen pointed at the upstream
+  repository — so an APK built from this fork was offering the corresponding source of somebody
+  else's code. The GPL asks that anyone given the binary can also get the source it was built
+  from, and that link was the one place the promise was made. It points here now, and so do the
+  bug tracker, the releases the updater checks, and the release notes of every APK, which name
+  the tag the build came from.
+- **The licence says what it means.** Every source file said "v3.0 or later"; the About screen
+  said "v3.0". Both say the same thing now, and the free-software notice the licence asks for
+  is on the About screen and in every set of release notes — along with where the complete
+  corresponding source is.
+- **This repository says what it is.** The README claimed the project was not a fork, which was
+  true of upstream and not of this. It names the upstream now, keeps the attribution, and spells
+  out what a fork that ships builds owes. `NOTICE` carries the attribution, the dependency
+  licences and the trademark note; `CONTRIBUTING` says what a contribution is licensed under
+  and what the header on a new file has to be.
+- **And the donations still go to the upstream maintainer**, who wrote the original. The app
+  says so now, under the QR code, rather than leaving you to work it out.
+
+## 0.12.3
+
+- **The guide keeps up with the remote.** Moving down the channel list used to redraw every
+  programme block on screen, because the guide read the clock afresh on every pass — so every
+  arrow press changed a value every row depended on, and every row had to be redone. The clock
+  now comes from the screen's, the rows' callbacks are remembered, and the preview's video
+  surface is left alone when the player has not changed.
+  On a stick, ten presses down the guide redrew **77 rows before, 30 after**; the time to draw
+  a frame halved, and a key press is now answered within a frame instead of two.
+
+## 0.12.2
+
+- **The channels you have are the channels you see.** A tvg-id is the guide's name for a
+  channel, not a stream, and providers reuse one id for every quality of a channel — and
+  sometimes for two channels that have nothing to do with each other. The playlist reader
+  treated the id as the stream, so everything after the first entry was quietly dropped: a
+  playlist that loaded fine in other players came out with **fewer channels here**, and the
+  quality switch had nothing to switch between. The identity of a stream is now the channel,
+  the quality and the category, and a true duplicate is still one channel.
+
+## 0.12.1
+
+- **A television is a television.** The app used to guess what it was running on and be wrong
+  about it. Now it asks: **TV** or **Phone / tablet**, on the first-run screen and in
+  Settings → Display & playback, and the answer is remembered. TV mode browses categories as
+  a plain list instead of a timeline, keeps the picture from being held awake so the set can
+  be switched off, and drives the whole interface from the d-pad. The phone layout is
+  untouched.
+- **Turn the television off without stopping the channel.** On a television the app no longer
+  holds the picture awake, so the set's own screensaver takes over — and with it, the channel
+  stops, the way a television does when it goes dark. A set that keeps talking to an empty room
+  is not a set. The viewer who comes back finds the channel still on it.
+- **And a button to turn the set off for good.** The player has a **Turn off** button now:
+  the stream stops, the app closes, and the box is left idle. It leaves a bookmark behind, so
+  opening the app again finds the channel you were on — the way a set-top box does, rather than
+  dropping the viewer on the guide.
+- **The remote can reach the buttons.** A clickable row is not a focus target, so on a
+  television the arrow keys walked straight past the transport bar, the category rail, the
+  channel column in the guide and every row of every menu — the only thing OK could press was
+  whatever happened to hold the focus, which was play/pause. All of them take the focus now,
+  the bar starts on the guide rather than on pause, and up/down stops changing the channel
+  while the arrows are walking the bar.
+- **And OK actually presses them.** `focusable()` before `clickable()` hides the clickable's
+  own key handling from Compose, so pressing OK on a button did nothing at all. The order is
+  now the other way round, everywhere — including the channel list in the player, the pickers
+  (quality, subtitles, audio, aspect) and the steppers in the recording settings.
+- **The buttons that arrive late are buttons too.** The chips that only exist once the guide
+  has caught up — rewind, forward, quality — were the ones the arrows walked straight past,
+  because the border around a focused button used to be *added* to the button rather than
+  drawn on it, and a button whose chain changes under it loses the focus. The border is
+  drawn now, and the whole bar — the live player's and the film's — is walkable from end to
+  end, right up to the power button.
+- **The guide takes the remote.** The up and down arrows walked the preview pane above the
+  guide and stopped dead at the guide's first row — the row that had the focus was also lost
+  every time the line-up was rebuilt by a sync. The arrows now move between channels (in the
+  grid, in a folder's list, and in the player's channel list), the preview follows, and the
+  focus is put back where it was after a rebuild.
+- **The catch-up list stopped covering the guide.** In the player, the "earlier programmes"
+  panel was drawn over the whole guide and took the d-pad with it, so opening the guide
+  showed the list instead of the guide. They are separate overlays now, one or the other.
+- **The channel list is the whole provider.** "Canais" in the player showed the folder you
+  happened to be browsing — a dead end the moment you wanted to change channel. It is every
+  channel of the provider now, and the arrows walk it.
+
+## 0.12.0
+
+- **Catch-up for M3U playlists.** Xtream providers have been able to keep an archive for years;
+  M3U providers use the Kodi tags (`catchup`, `catchup-source`, `catchup-days`,
+  `catchup-correction`, `catchup-type`, `timeshift`) and every mode Kodi defines — `default`,
+  `append`, `shift`, `flussonic`, `xc`, `vod`. Both work now. The programmes that already aired
+  are listed in the channel menu under **Earlier — watch from start**, and in the player itself,
+  over the picture, without leaving what you were watching.
+- **Catch-up asks the provider for the right hour.** The Xtream panel names its archive
+  `/tv_archive/{stream_id}/YYYY-MM-DD:HH-mm.ts` and looks that name up against *its* timezone —
+  so a phone in São Paulo asking a Paris panel for "19:00" was getting a recording from three
+  hours earlier. The panel's own timezone is now read at login and kept, and a playlist with no
+  panel to ask can have one set by hand.
+- **Catch-up knows how far back the archive goes.** The archive depth (`tv_archive_duration`,
+  `catchup-days`) was stored and never read, so every finished programme offered a link the
+  provider would answer with a 404. The depth now rules programmes out, and says so instead of
+  failing. A 404 also says which of the two it is now: a provider whose server is down, or an
+  address that is wrong.
+- **A live transport bar.** The live player had no way to scrub: play, pause and fifteen-second
+  jumps, and the two-minute buffer the player was already keeping was unreachable. There is a bar
+  now, a **LIVE** button back to the edge, and — where the stream allows it — the past to rewind
+  into. The transport row scrolls, so the last chip is no longer squeezed into a column of
+  letters.
+- **The guide, in the player.** Watching a channel and wanting to know what else is on is the
+  most ordinary thing a viewer does, and making it leave the player to find out was a small
+  hostility. The guide is now over the picture (the remote's GUIDE key opens it, as do two new
+  buttons), and it can page back to yesterday.
+- **Guide history.** How much guide to keep is yours to choose — a day, three or seven. The
+  provider is asked for exactly what will be kept, so a programme from last week is still there
+  to watch from the archive.
+- **Playback knobs.** A buffer size for the box that is short of memory or on a bad line, and
+  an escape hatch for the boxes whose hardware decoder stutters or shows a green picture: prefer
+  the software decoder instead.
+- **A guide that was never there.** A panel serves the guide it generated for one window, and
+  answers an empty file — with no error — for any other. The app was asking for a window some
+  panels do not have, so their guide was simply absent. The windows are tried in turn now, and
+  the first one with a guide in it wins.
+- **A few things that were quietly wrong.** The built-in US and Canadian EPG guides pointed at
+  files their host had renamed, and answered 404; the settings button fell off the bottom of the
+  side rail on a phone in landscape; the provider chips on the first-run screen did the same.
+
 ## 0.11.8
 
 - **Edit a saved provider.** Settings → Providers now has an **Edit** button on each provider, so you

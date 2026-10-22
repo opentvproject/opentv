@@ -35,6 +35,29 @@ class AppSettings private constructor(context: Context) {
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     /**
+     * Which surface the app is being used on: the television, or the phone/tablet.
+     *
+     * The device usually can tell — a leanback feature, a television UI mode — but not
+     * always: a Google TV stick that reports a phone profile, a phone driving a big screen
+     * over HDMI, a tablet in a dock. Guessing wrong is expensive, because the two surfaces
+     * want different things: a television is driven by a d-pad, wants a category folder to
+     * open as a plain list and wants a way to blank the picture with the programme still
+     * playing; a phone is driven by a finger and wants neither.
+     *
+     * So the app asks, once, and remembers the answer. Until it is answered, the device's
+     * own opinion stands.
+     */
+    enum class AppMode { TV, PHONE }
+
+    private val _appMode = MutableStateFlow(readAppMode(context))
+    val appMode: StateFlow<AppMode> = _appMode.asStateFlow()
+
+    fun setAppMode(mode: AppMode) {
+        prefs.edit().putString(KEY_APP_MODE, mode.name).apply()
+        _appMode.value = mode
+    }
+
+    /**
      * How the live-TV channel list is laid out: the scrolling EPG time-[ChannelLayout.GRID], or a
      * compact one-channel-per-row [ChannelLayout.LIST] (logo, name, now/next) for people who find
      * the full grid busy. Defaults to the grid.
@@ -47,6 +70,35 @@ class AppSettings private constructor(context: Context) {
     /** Whether embedded subtitles/closed captions are shown when a stream carries them. */
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
+
+    /**
+     * How much video the player keeps buffered.
+     *
+     * The setting exists because the right answer is different on every box: one is short of
+     * memory and would rather start quickly, another is on a bad line and would rather wait.
+     * It applies to ordinary playback — the guide preview, the DVR window and a recording
+     * still being written keep their own tuning, which is measured for what they do.
+     */
+    private val _bufferPreset = MutableStateFlow(savedBufferPreset(context))
+    val bufferPreset: StateFlow<BufferPreset> = _bufferPreset.asStateFlow()
+
+    fun setBufferPreset(preset: BufferPreset) {
+        prefs.edit().putString(KEY_BUFFER_PRESET, preset.name).apply()
+        _bufferPreset.value = preset
+    }
+
+    /**
+     * Which decoder the player reaches for. AUTO leaves it to the platform, which is right
+     * almost always; SOFTWARE_FIRST is the escape hatch for a box whose hardware decoder
+     * mangles a particular codec.
+     */
+    private val _decoderPreference = MutableStateFlow(savedDecoderPreference(context))
+    val decoderPreference: StateFlow<DecoderPreference> = _decoderPreference.asStateFlow()
+
+    fun setDecoderPreference(preference: DecoderPreference) {
+        prefs.edit().putString(KEY_DECODER, preference.name).apply()
+        _decoderPreference.value = preference
+    }
 
     /** Whether the selected channel plays live inside the guide's preview pane. */
     private val _guidePreviewVideo = MutableStateFlow(prefs.getBoolean(KEY_PREVIEW_VIDEO, true))
@@ -148,6 +200,19 @@ class AppSettings private constructor(context: Context) {
         _resumeLastChannel.value = enabled
     }
 
+    /**
+     * A one-shot bookmark: "open on the channel I was on next time".
+     *
+     * Set by the player's **Turn off** button, whose whole meaning is "I am leaving, and this
+     * is where I was" — the gesture of a television set being switched off and found again
+     * later on the same channel. It is deliberately not the standing "resume last channel"
+     * preference: that one is a decision about how the app always opens, and this is a
+     * decision about this one evening. It is consumed by the next launch.
+     */
+    var resumeOnNextLaunch: Boolean
+        get() = prefs.getBoolean(KEY_RESUME_NEXT, false)
+        set(value) { prefs.edit().putBoolean(KEY_RESUME_NEXT, value).apply() }
+
     // ---- Recording behaviour -----------------------------------------------------------------
 
     /** Minutes to start a scheduled recording early, so a late start isn't clipped. */
@@ -180,8 +245,13 @@ class AppSettings private constructor(context: Context) {
     }
 
     /**
-     * Pause & rewind live TV via a rolling on-disk buffer of the current channel. Experimental and
-     * heavier on weak boxes, so it's opt-in (off by default); when off, playback is unchanged.
+     * Pause & rewind live TV: the player keeps the last couple of minutes of the current
+     * channel in memory, so a paused picture can be scrubbed back. Experimental, and it costs
+     * memory on a weak box, so it is opt-in (off by default); when off, playback is unchanged.
+     *
+     * This is the *client-side* window — a couple of minutes, and only for streams the
+     * player can seek in. The provider's own archive, days of past programmes, is the
+     * catch-up feature, and it works whatever this is set to.
      */
     private val _livePauseEnabled = MutableStateFlow(prefs.getBoolean(KEY_LIVE_PAUSE, false))
     val livePauseEnabled: StateFlow<Boolean> = _livePauseEnabled.asStateFlow()
@@ -261,9 +331,45 @@ class AppSettings private constructor(context: Context) {
         _playerResizeMode.value = mode
     }
 
+    /**
+     * How much guide to keep.
+     *
+     * A ceiling, not a promise: a provider only serves what its own archive holds, and the
+     * panel is asked for the same number of days. Keeping more means a bigger database and
+     * a longer guide download, so the choice belongs to whoever pays for the box's memory.
+     */
+    enum class GuideHistory(val days: Int) {
+        ONE_DAY(1),
+        THREE_DAYS(3),
+        SEVEN_DAYS(7);
+
+        companion object {
+            fun fromStoredValue(value: String?): GuideHistory =
+                entries.firstOrNull { it.name == value } ?: ONE_DAY
+        }
+    }
+
+    private val _guideHistory = MutableStateFlow(savedGuideHistory(context))
+    val guideHistory: StateFlow<GuideHistory> = _guideHistory.asStateFlow()
+
+    fun setGuideHistory(history: GuideHistory) {
+        prefs.edit().putString(KEY_GUIDE_HISTORY, history.name).apply()
+        _guideHistory.value = history
+    }
+
     private fun readThemeMode(): ThemeMode =
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "") }
             .getOrDefault(ThemeMode.SYSTEM)
+
+    /**
+     * The saved mode, or the device's own opinion while the user has not chosen one.
+     *
+     * A stored value that is not a mode we know (an older build, a hand-edited prefs file)
+     * falls back to detection rather than throwing the app into an unknown state.
+     */
+    private fun readAppMode(context: Context): AppMode =
+        runCatching { AppMode.valueOf(prefs.getString(KEY_APP_MODE, null) ?: "") }
+            .getOrElse { if (context.isTelevisionDevice()) AppMode.TV else AppMode.PHONE }
 
     private fun readChannelLayout(): ChannelLayout =
         runCatching { ChannelLayout.valueOf(prefs.getString(KEY_CHANNEL_LAYOUT, null) ?: "") }
@@ -422,14 +528,19 @@ class AppSettings private constructor(context: Context) {
 
     companion object {
         private const val KEY_THEME = "theme_mode"
+        private const val KEY_APP_MODE = "app_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
         private const val KEY_SUBTITLES = "subtitles_enabled"
+        private const val KEY_BUFFER_PRESET = "buffer_preset"
+        private const val KEY_DECODER = "decoder_preference"
+        private const val KEY_GUIDE_HISTORY = "guide_history"
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
+        private const val KEY_RESUME_NEXT = "resume_on_next_launch"
         private const val KEY_CONTENT_LIVE = "content_live"
         private const val KEY_CONTENT_MOVIES = "content_movies"
         private const val KEY_CONTENT_SERIES = "content_series"
@@ -468,5 +579,42 @@ class AppSettings private constructor(context: Context) {
             instance ?: synchronized(this) {
                 instance ?: AppSettings(context).also { instance = it }
             }
+
+        /**
+         * The stored buffer preset, read straight from the preferences.
+         *
+         * The singleton reads the same file when it is created, but a value written by
+         * another process — or by the settings screen a moment ago — is only visible here.
+         * The player asks at the moment a playback session opens, which is the moment the
+         * answer has to be right.
+         */
+        fun savedBufferPreset(context: Context): BufferPreset =
+            runCatching {
+                BufferPreset.fromStoredValue(
+                    context.applicationContext
+                        .getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+                        .getString(KEY_BUFFER_PRESET, null),
+                )
+            }.getOrDefault(BufferPreset.DEFAULT)
+
+        /** The stored guide history, read straight from the preferences. */
+        fun savedGuideHistory(context: Context): GuideHistory =
+            runCatching {
+                GuideHistory.fromStoredValue(
+                    context.applicationContext
+                        .getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+                        .getString(KEY_GUIDE_HISTORY, null),
+                )
+            }.getOrDefault(GuideHistory.ONE_DAY)
+
+        /** The stored decoder preference, read straight from the preferences. */
+        fun savedDecoderPreference(context: Context): DecoderPreference =
+            runCatching {
+                DecoderPreference.fromStoredValue(
+                    context.applicationContext
+                        .getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+                        .getString(KEY_DECODER, null),
+                )
+            }.getOrDefault(DecoderPreference.AUTO)
     }
 }

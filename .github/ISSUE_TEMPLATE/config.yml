@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Provider or subscription problems
-    url: https://github.com/legionnaireneyland/opentv/blob/main/README.md
+    url: https://github.com/T3lo5/opentv/blob/main/README.md
     about: OpenTV is a player and supplies no channels. Problems with your IPTV service are between you and that provider.

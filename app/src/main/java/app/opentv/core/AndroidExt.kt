@@ -7,9 +7,11 @@ package app.opentv.core
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.UiModeManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -24,6 +26,22 @@ tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+/**
+ * Whether this device is a television.
+ *
+ * Two signals, either of which is enough: the system is in television UI mode, or the
+ * device declares a leanback/television feature. This is only the app's *opinion* — the
+ * user can override it in Settings (see [AppSettings.AppMode]), because a Google TV stick
+ * that reports a phone profile is a real thing and so is a phone on a wall-mounted screen.
+ */
+fun Context.isTelevisionDevice(): Boolean {
+    val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+    if (uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) return true
+    val packageManager = packageManager
+    return packageManager.hasSystemFeature("android.software.leanback") ||
+        packageManager.hasSystemFeature("android.hardware.type.television")
 }
 
 /**

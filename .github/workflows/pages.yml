@@ -20,6 +20,10 @@ concurrency:
 
 jobs:
   deploy:
+    # Only the upstream project publishes the install page. A fork without a Pages site would
+    # fail this workflow on every push that touched docs/, and the fork's APKs are distributed
+    # through the releases instead — see SETUP.md.
+    if: github.repository_owner == 'opentvproject'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

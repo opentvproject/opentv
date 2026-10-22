@@ -6,7 +6,6 @@
 package app.opentv
 
 import android.app.PictureInPictureParams
-import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -56,6 +55,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.core.isTelevisionDevice
 import app.opentv.data.parser.displayTitle
 import app.opentv.ui.MainScreen
 import app.opentv.ui.ProfilesViewModel
@@ -95,11 +95,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handlePlayIntent(intent)
-        val isTelevision = isRunningOnTelevision(this)
 
         setContent {
             val settings = remember { ServiceLocator.get(this).settings }
             val themeMode by settings.themeMode.collectAsState()
+            // The mode the user chose — television or phone — decides the whole layout. It
+            // starts as the device's own opinion and can be changed in Settings, live.
+            val appMode by settings.appMode.collectAsState()
+            val isTelevision = appMode == AppSettings.AppMode.TV
             val darkTheme = when (themeMode) {
                 AppSettings.ThemeMode.DARK -> true
                 AppSettings.ThemeMode.LIGHT -> false
@@ -250,12 +253,20 @@ private fun OpenTvApp(isTelevision: Boolean) {
 
     // Boot to last channel: if enabled and we have one, jump straight into the player on launch.
     // Runs once; backing out returns to the guide and doesn't re-trigger.
+    //
+    // The player's "Turn off" button leaves a one-shot bookmark behind: the television was
+    // switched off on a channel, so switching it on again should find that channel — the way
+    // a set-top box does, rather than dropping the viewer on the guide.
     val bootContext = androidx.compose.ui.platform.LocalContext.current
     val bootSettings = remember { ServiceLocator.get(bootContext).settings }
     LaunchedEffect(start) {
-        if (start == Routes.HOME && bootSettings.resumeLastChannel.value && bootSettings.lastChannelId != 0L) {
+        if (start != Routes.HOME || bootSettings.lastChannelId == 0L) return@LaunchedEffect
+        val bookmarked = bootSettings.resumeOnNextLaunch
+        if (bootSettings.resumeLastChannel.value || bookmarked) {
             navController.navigate(Routes.player(bootSettings.lastChannelId))
         }
+        // The bookmark is for this one launch; the standing preference is the user's own.
+        if (bookmarked) bootSettings.resumeOnNextLaunch = false
     }
 
     // A tapped reminder notification asks for a specific channel. Consume it so it fires once and
@@ -372,7 +383,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     },
                     onPlayCatchup = { key, url, title, ua ->
                         // Catch-up is a seekable archive stream — plays through the VOD player.
-                        navController.navigate(Routes.vodPlayer(key, url, title, ua))
+                        navController.navigate(Routes.vodPlayer(key, url, title, ua.orEmpty()))
                     },
                     activeProfileName = activeProfileName,
                 )
@@ -469,6 +480,10 @@ private fun OpenTvApp(isTelevision: Boolean) {
                 PlayerScreen(
                     channelId = channelId,
                     onBack = { navController.popBackStack() },
+                    onPlayCatchup = { key, url, title, ua ->
+                        // Catch-up is a seekable archive stream — plays through the VOD player.
+                        navController.navigate(Routes.vodPlayer(key, url, title, ua.orEmpty()))
+                    },
                 )
             }
 
@@ -607,11 +622,9 @@ private fun RecordingSwitchBanner() {
  *
  * Checked at runtime rather than by shipping a separate leanback build: one APK for phone,
  * tablet, Android TV and Fire TV means one thing to release and one thing to test.
+ *
+ * This is the device's *opinion*; the user can override it in Settings (see
+ * [AppSettings.AppMode]) when the box lies about itself. The app's own layout follows the
+ * mode, not this.
  */
-fun isRunningOnTelevision(context: Context): Boolean {
-    val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-    if (uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) return true
-    val packageManager = context.packageManager
-    return packageManager.hasSystemFeature("android.software.leanback") ||
-        packageManager.hasSystemFeature("android.hardware.type.television")
-}
+fun isRunningOnTelevision(context: Context): Boolean = context.isTelevisionDevice()

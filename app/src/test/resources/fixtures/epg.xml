@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="panel.example">
+  <channel id="Boxkids.br">
+    <display-name>Canal de Teste</display-name>
+  </channel>
+  <programme start="20261020000000 +0000" stop="20261020010000 +0000" channel="Boxkids.br">
+    <title>Programa Gravado</title>
+    <desc>Um programa do arquivo</desc>
+  </programme>
+  <programme start="20261020010000 +0000" stop="20261020020000 +0000" channel="Boxkids.br">
+    <title>Outro Programa</title>
+    <desc>Mais um do arquivo</desc>
+  </programme>
+</tv>

@@ -653,7 +653,19 @@ class CatalogRepository(
     private suspend fun syncXtreamLive(source: Source, nowUtcMillis: Long): SyncResult {
         // Authenticate first so a wrong password produces a clear message rather than
         // four separate confusing failures further down.
-        api.authenticate(source)
+        val account = api.authenticate(source)
+
+        // The panel's own timezone is the only place the provider's clock is written down,
+        // and a catch-up URL has to name the start time on that clock. Keep it: without it
+        // the app guesses from the device's zone, which is wrong for half the world.
+        //
+        // Only filled in when the source has none — a zone the user typed by hand wins,
+        // because they typed it for a reason.
+        if (source.timezone.isNullOrBlank()) {
+            account.timezone
+                ?.takeIf { it.isNotBlank() }
+                ?.let { sourceDao.setTimezone(source.id, it) }
+        }
 
         val liveCategories = api.liveCategories(source)
         val channels = api.liveStreams(source)

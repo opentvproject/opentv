@@ -55,6 +55,15 @@ interface SourceDao {
 
     @Query("UPDATE sources SET lastCatalogSyncMillis = :millis WHERE id = :id")
     suspend fun markCatalogSynced(id: Long, millis: Long)
+
+    /**
+     * Records the provider's own timezone, as the panel reported it.
+     *
+     * A targeted update rather than a whole-row write, so it cannot race the user's own
+     * edits to the source (a name, a User-Agent) the way `update` would.
+     */
+    @Query("UPDATE sources SET timezone = :timezone WHERE id = :id")
+    suspend fun setTimezone(id: Long, timezone: String)
 }
 
 @Dao
@@ -331,11 +340,25 @@ interface EpgFeedDao {
     @Query("SELECT * FROM epg_feeds WHERE url = :url")
     suspend fun byUrl(url: String): EpgFeed?
 
+    /** One of the curated built-in feeds, by the name it is shown under. */
+    @Query("SELECT * FROM epg_feeds WHERE builtIn = 1 AND name = :name")
+    suspend fun builtInByName(name: String): EpgFeed?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(feed: EpgFeed): Long
 
     @Update
     suspend fun update(feed: EpgFeed)
+
+    /**
+     * Points a feed at a different file.
+     *
+     * The sync stamps are cleared with it: the feed's last outcome described the old file,
+     * and the next sync has to run against the new one rather than wait out the interval
+     * on a URL that is now dead.
+     */
+    @Query("UPDATE epg_feeds SET url = :url, lastSyncMillis = 0, lastResult = '' WHERE id = :id")
+    suspend fun setUrl(id: Long, url: String)
 
     @Query("UPDATE epg_feeds SET enabled = :enabled WHERE id = :id")
     suspend fun setEnabled(id: Long, enabled: Boolean)
@@ -399,6 +422,26 @@ interface ProgrammeDao {
         """
     )
     suspend fun upcoming(channelId: String, nowUtcMillis: Long, limit: Int): List<Programme>
+
+    /**
+     * The programmes a channel has already finished, most recent first — the catch-up list.
+     *
+     * The guide grid starts at the current half-hour, so the past is invisible on screen even
+     * though the rows are still in the table. They are exactly what the archive plays back,
+     * and the `since` bound is the retention window: the guide is pruned to a day, so asking
+     * for more would only cost a scan.
+     */
+    @Query(
+        """
+        SELECT * FROM programmes
+        WHERE epgChannelId = :channelId
+          AND endUtcMillis <= :nowUtcMillis
+          AND endUtcMillis > :sinceUtcMillis
+        ORDER BY startUtcMillis DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun finished(channelId: String, nowUtcMillis: Long, sinceUtcMillis: Long, limit: Int): List<Programme>
 
     @Query("SELECT COUNT(*) FROM programmes WHERE feedId = :feedId")
     suspend fun countForFeed(feedId: Long): Int

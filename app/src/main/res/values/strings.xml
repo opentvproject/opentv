@@ -37,6 +37,7 @@
     <string name="guide_all_channels">All channels</string>
     <string name="guide_watch_from_start">▶  Watch from start (catch-up)</string>
     <string name="guide_catchup_link_failed">Couldn\'t build the catch-up link</string>
+    <string name="guide_catchup_outside_window">The provider\'s archive only goes back %1$d days</string>
     <string name="guide_cancel_reminder">🔔  Cancel reminder</string>
     <string name="guide_reminder_removed">Reminder removed</string>
     <string name="guide_remind_me">🔔  Remind me</string>
@@ -51,6 +52,8 @@
     <string name="guide_no_external_player">No external player installed</string>
     <string name="guide_record_now_playing">●  Record what\'s on now</string>
     <string name="guide_later_header">Later — record or remind</string>
+    <string name="guide_catchup_earlier">Earlier — watch from start</string>
+    <string name="catchup_yesterday">Yesterday %1$s</string>
     <string name="guide_no_info">No guide information</string>
     <string name="guide_next_prefix">Next  %1$s  %2$s</string>
     <string name="guide_loading_channels">Loading your channels</string>
@@ -71,6 +74,7 @@
     <string name="guide_cd_add_source">Add source</string>
     <string name="guide_prev_day">Previous day</string>
     <string name="guide_next_day">Next day</string>
+    <string name="guide_yesterday">Yesterday</string>
     <string name="guide_today">Today</string>
     <string name="guide_tomorrow">Tomorrow</string>
     <string name="guide_highlight_hint">Highlight a channel to see what\'s on</string>
@@ -118,12 +122,18 @@
     <string name="player_rewind">Rewind</string>
     <string name="player_pause">Pause</string>
     <string name="player_forward">Forward</string>
+    <string name="player_live">LIVE</string>
+    <string name="player_guide">Guide</string>
+    <string name="player_catchup_title">Earlier</string>
+    <string name="player_catchup_empty">Nothing from the archive for this channel — the provider may not keep one, or the guide may not go back that far.</string>
+    <string name="player_no_rewind">This stream can\'t be rewound — the archive may be in the channel menu</string>
     <string name="player_subtitles">Subtitles</string>
     <string name="player_audio">Audio</string>
     <string name="player_quality">Quality</string>
     <string name="player_aspect">Aspect</string>
     <string name="player_record">Record</string>
     <string name="player_pop_out">Pop out</string>
+    <string name="player_turn_off">Turn off</string>
     <string name="player_last">Last</string>
     <string name="player_quality_standard">Standard</string>
     <string name="player_aspect_fit">Fit</string>
@@ -163,6 +173,10 @@
     <string name="settings_about_subtitle">Version, updates, licence and links</string>
 
     <!-- ============================ Display & playback settings ============================ -->
+    <string name="settings_section_mode">Interface mode</string>
+    <string name="settings_mode_tv">TV — remote control</string>
+    <string name="settings_mode_phone">Phone / tablet — touch</string>
+    <string name="settings_mode_note">TV mode is built for a remote: categories open as a plain list, the player can blank the picture while the channel keeps playing, and everything is reachable with the arrow keys. You can change this at any time.</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme_system">Follow system</string>
     <string name="settings_theme_dark">Dark</string>
@@ -188,11 +202,25 @@
     <string name="settings_live_preview_subtitle">Play the selected channel in the preview pane. Turn this off if the guide stutters on an older box.</string>
     <string name="settings_preview_sound_title">Preview sound</string>
     <string name="settings_preview_sound_subtitle">Play the preview channel\'s audio too, not just the picture.</string>
+    <string name="settings_guide_history_title">Guide history</string>
+    <string name="settings_guide_history_one">One day</string>
+    <string name="settings_guide_history_three">Three days</string>
+    <string name="settings_guide_history_seven">Seven days</string>
+    <string name="settings_guide_history_note">How much guide to keep, so the programmes that already aired are still there to watch from the archive. A provider only serves what its own archive holds, and more history means a bigger database and a longer download.</string>
     <string name="settings_section_playback">Playback</string>
     <string name="settings_subtitles_title">Show subtitles when available</string>
     <string name="settings_subtitles_subtitle">The default for new channels. While watching, the Subtitles button on the player lets you pick a specific track or turn them off.</string>
     <string name="settings_resume_title">Resume last channel on startup</string>
     <string name="settings_resume_subtitle">Open the app straight into the channel you were last watching, instead of the guide. Press Back to reach the guide.</string>
+    <string name="settings_buffer_title">Playback buffer</string>
+    <string name="settings_buffer_default">Default — balanced</string>
+    <string name="settings_buffer_small">Small — starts fast, uses less memory</string>
+    <string name="settings_buffer_medium">Medium</string>
+    <string name="settings_buffer_large">Large — steadier on a bad line</string>
+    <string name="settings_buffer_extra_large">Extra large — the steadiest, the most memory</string>
+    <string name="settings_buffer_note">How much video the player keeps in memory. A bigger buffer rides out a bad connection; a smaller one starts sooner. It applies the next time you open a channel.</string>
+    <string name="settings_decoder_title">Prefer the software decoder</string>
+    <string name="settings_decoder_subtitle">For boxes whose hardware decoder stutters or shows green picture. Slower, but correct where the hardware one is not. It applies the next time you open a channel.</string>
     <string name="settings_sleep_timer">Sleep timer</string>
     <string name="settings_sleep_off_desc">Off — playback keeps going until you stop it.</string>
     <string name="settings_sleep_on_desc">On — playback will stop in about %1$d min.</string>
@@ -276,7 +304,7 @@
     <string name="recset_autoswitch">Auto-switch when recording starts</string>
     <string name="recset_autoswitch_desc">On a single-connection provider, move the screen onto a recording as it starts (with a 30-second warning) so your live stream isn\'t cut off</string>
     <string name="recset_livepause">Pause &amp; rewind live TV</string>
-    <string name="recset_livepause_desc">Hold a couple of minutes of live TV in memory so you can pause and rewind it (experimental — uses more memory)</string>
+    <string name="recset_livepause_desc">Hold a couple of minutes of live TV in memory so the transport bar can rewind it. Only works on streams the player can seek in (experimental — uses more memory)</string>
     <string name="recset_pw_show">Show password</string>
     <string name="recset_pw_hide">Hide password</string>
     <string name="recset_storage_title">Storage</string>
@@ -344,17 +372,22 @@
     <string name="about_sponsor_github">GitHub Sponsors</string>
     <string name="about_donate_paypal">Donate via PayPal</string>
     <string name="about_scan_to_donate">Scan to donate</string>
+    <string name="about_donation_goes_to_upstream">These donations go to the upstream maintainer of OpenTV, who wrote the original — this fork keeps the credit where it is due.</string>
     <string name="about_licence_links_title">Licence &amp; links</string>
     <string name="about_licence_label">Licence</string>
     <string name="about_source_code">Source code</string>
     <string name="about_report_bug">Report a bug / request a feature</string>
     <string name="about_install_page">Install page</string>
+    <string name="about_upstream_project">Upstream project</string>
+    <string name="about_free_software_notice">This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.\n\nThis program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.\n\nYou should have received a copy of the GNU General Public License along with this program. If not, see https://www.gnu.org/licenses/.</string>
 
     <!-- ============================ Onboarding / add source ============================ -->
     <string name="onboarding_default_provider_name">My provider</string>
     <string name="onboarding_default_playlist_name">My playlist</string>
     <string name="onboarding_add_provider_title">Add your provider</string>
     <string name="onboarding_add_provider_desc">OpenTV is a player. It doesn\'t supply channels — you connect the service you already pay for.</string>
+    <string name="onboarding_mode_title">How will you use OpenTV?</string>
+    <string name="onboarding_mode_note">A television is driven by a remote, a phone by a finger. Pick the one that fits, and you can change it later in Settings.</string>
     <string name="onboarding_xtream_login">Xtream Codes login</string>
     <string name="onboarding_m3u_url">M3U playlist URL</string>
     <string name="onboarding_stalker_portal">Stalker portal</string>
@@ -371,6 +404,8 @@
     <string name="onboarding_guide_url_optional">Guide (XMLTV) URL — optional</string>
     <string name="onboarding_guide_blank_help">Leave blank to use your provider\'s guide automatically.</string>
     <string name="onboarding_user_agent_help">Some providers block unfamiliar apps with a 403. If every channel fails, try a common player\'s User-Agent here.</string>
+    <string name="onboarding_timezone_optional">Timezone — optional</string>
+    <string name="onboarding_timezone_help">The provider\'s own timezone, e.g. Europe/Paris. Catch-up links ask for the recording on that clock, not on this device\'s. Leave blank to use your device\'s time.</string>
     <string name="onboarding_working">Working…</string>
     <string name="onboarding_save_load">Save and load</string>
     <string name="onboarding_use_phone">Use my phone instead</string>
