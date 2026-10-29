@@ -84,6 +84,7 @@ import app.opentv.player.PlayerController
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
+import app.opentv.ui.WindowWidth
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -110,6 +111,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     isTelevision: Boolean,
     hasSources: Boolean,
+    windowWidth: WindowWidth = WindowWidth.EXPANDED,
     isSyncing: Boolean,
     onPlayChannel: (Channel) -> Unit,
     onAddSource: () -> Unit,
@@ -120,10 +122,18 @@ fun HomeScreen(
     val context = LocalContext.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
-    val previewEnabled by settings.guidePreviewVideo.collectAsState()
+    // A phone gets a single touch-first column: categories as a chip row, a plain channel list, and
+    // no inline preview — it would eat half the screen and quietly stream on mobile data.
+    val compact = windowWidth == WindowWidth.COMPACT
+    val previewSetting by settings.guidePreviewVideo.collectAsState()
+    val previewEnabled = previewSetting && !compact
     val channelLayout by settings.channelLayout.collectAsState()
 
     val categories by viewModel.visibleCategoryGroups.collectAsState()
+    val manageableCategories by viewModel.manageableCategoryGroups.collectAsState()
+    val categoryWhitelist by viewModel.liveCategoryWhitelist.collectAsState()
+    val categorySortOrder by settings.categorySortOrder.collectAsState()
+    var showCategoryManager by remember { mutableStateOf(false) }
     val rows by viewModel.rows.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val favouritesOnly by viewModel.favouritesOnly.collectAsState()
@@ -169,7 +179,8 @@ fun HomeScreen(
     // leftmost (channel) column slides it back and drops focus on the selected category.
     var railExpanded by remember { mutableStateOf(true) }
     val railWidth by animateDpAsState(
-        targetValue = if (railExpanded) 240.dp else 0.dp,
+        // Narrower on a foldable/small tablet, so the channel list keeps a useful width beside it.
+        targetValue = if (!railExpanded) 0.dp else if (windowWidth == WindowWidth.MEDIUM) 200.dp else 240.dp,
         label = "railWidth",
     )
     val railFocusRequester = remember { FocusRequester() }
@@ -296,7 +307,8 @@ fun HomeScreen(
         // ---- Category rail -----------------------------------------------------------------
         // Width animates to 0 while focus is in the guide (see onFocusRow) so the grid gets the
         // whole screen; d-pad LEFT from the guide's channel column slides it back (onExitLeft…).
-        Column(
+        // A phone shows the categories as a chip row above the list instead (see below).
+        if (!compact) Column(
             Modifier
                 .width(railWidth)
                 .fillMaxHeight()
@@ -371,11 +383,35 @@ fun HomeScreen(
                         modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
+                // Sort and whitelist the rail. At the foot, so the categories themselves stay
+                // first under the d-pad.
+                if (manageableCategories.isNotEmpty()) {
+                    item(key = "manage-categories") {
+                        Spacer(Modifier.height(6.dp))
+                        RailEntry(
+                            label = stringResource(R.string.categories_manage),
+                            selected = false,
+                            onClick = { showCategoryManager = true },
+                        )
+                    }
+                }
             }
         }
 
         // ---- Preview + guide ---------------------------------------------------------------
         Column(Modifier.weight(1f)) {
+            if (compact) {
+                CompactCategoryChips(
+                    sources = sources,
+                    selectedSource = selectedSource,
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    favouritesOnly = favouritesOnly,
+                    canManage = manageableCategories.isNotEmpty(),
+                    viewModel = viewModel,
+                    onManage = { showCategoryManager = true },
+                )
+            }
             if (rows.isEmpty()) {
                 when {
                     favouritesOnly -> NoFavouritesState()
@@ -410,29 +446,31 @@ fun HomeScreen(
                     }
                 }
 
-                val dayLabel = when (guideDayOffset) {
-                    0 -> stringResource(R.string.guide_today)
-                    1 -> stringResource(R.string.guide_tomorrow)
-                    else -> remember(windowStart) {
-                        SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
+                if (!compact) {
+                    val dayLabel = when (guideDayOffset) {
+                        0 -> stringResource(R.string.guide_today)
+                        1 -> stringResource(R.string.guide_tomorrow)
+                        else -> remember(windowStart) {
+                            SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
+                        }
                     }
+                    GuidePreview(
+                        row = highlightedRow,
+                        nowMillis = nowMillis,
+                        onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
+                        onRefresh = onRefresh,
+                        onAddSource = onAddSource,
+                        previewPlayer = if (previewEnabled && !recordingActive) previewController.player else null,
+                        isRecording = highlightedRow?.primary?.id?.let { id ->
+                            activeRecordings.any { it.channelId == id }
+                        } == true,
+                        onRecord = { recordSelected() },
+                        dayLabel = dayLabel,
+                        canGoPrevDay = guideDayOffset > 0,
+                        onPrevDay = { viewModel.nudgeGuideDay(-1) },
+                        onNextDay = { viewModel.nudgeGuideDay(1) },
+                    )
                 }
-                GuidePreview(
-                    row = highlightedRow,
-                    nowMillis = nowMillis,
-                    onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
-                    onRefresh = onRefresh,
-                    onAddSource = onAddSource,
-                    previewPlayer = if (previewEnabled && !recordingActive) previewController.player else null,
-                    isRecording = highlightedRow?.primary?.id?.let { id ->
-                        activeRecordings.any { it.channelId == id }
-                    } == true,
-                    onRecord = { recordSelected() },
-                    dayLabel = dayLabel,
-                    canGoPrevDay = guideDayOffset > 0,
-                    onPrevDay = { viewModel.nudgeGuideDay(-1) },
-                    onNextDay = { viewModel.nudgeGuideDay(1) },
-                )
                 // Shared by both layouts: focus follows the highlight and collapses the rail; LEFT
                 // from the leftmost element reopens the rail (consumed only when it was hidden).
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
@@ -448,7 +486,17 @@ fun HomeScreen(
                         false
                     }
                 }
-                if (channelLayout == AppSettings.ChannelLayout.LIST) {
+                if (compact) {
+                    // Touch-first: a tap watches, a long-press opens the Watch/Record/Schedule menu.
+                    // Always the list — a time-grid is unreadable at phone width.
+                    CompactChannelList(
+                        rows = rows,
+                        onWatch = { row -> goFullscreen(row.primary) },
+                        onMenu = { row -> channelMenu = row },
+                        onToggleFavourite = { viewModel.toggleFavourite(it) },
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (channelLayout == AppSettings.ChannelLayout.LIST) {
                     ChannelList(
                         rows = rows,
                         selectedKey = highlightedRow?.key,
@@ -476,6 +524,17 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (showCategoryManager) {
+        CategoryManagerDialog(
+            categories = manageableCategories.map { ManagedCategory(it.key, it.label) },
+            whitelist = categoryWhitelist,
+            sortOrder = categorySortOrder,
+            onSortOrder = settings::setCategorySortOrder,
+            onSave = viewModel::saveCategoryWhitelist,
+            onDismiss = { showCategoryManager = false },
+        )
     }
 
     // The record menu for a programme picked in the grid.

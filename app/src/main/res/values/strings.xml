@@ -503,4 +503,50 @@
     <string name="settings_tmdb_save">Save key</string>
     <string name="settings_tmdb_saved">TMDB key saved</string>
     <string name="settings_tmdb_active">Active</string>
+
+    <!-- Category sorting & filtering -->
+    <string name="categories_manage">Manage categories</string>
+    <string name="categories_manage_short">Manage</string>
+    <string name="categories_manage_title">Categories</string>
+    <string name="categories_sort_title">Sort categories</string>
+    <string name="categories_sort_default">Provider order</string>
+    <string name="categories_sort_az">Name A–Z</string>
+    <string name="categories_sort_za">Name Z–A</string>
+    <string name="categories_filter_hint">Filter categories</string>
+    <string name="categories_select_all">Select all</string>
+    <string name="categories_deselect_all">Deselect all</string>
+    <string name="categories_invert">Invert</string>
+    <string name="categories_shown_count">%1$d of %2$d shown</string>
+    <string name="categories_none_match">No categories match</string>
+    <string name="categories_pick_one">Tick at least one category to show</string>
+    <string name="categories_note">Unticked categories are hidden from the rail, and their channels from All channels. Search and favourites still find them.</string>
+
+    <!-- Subtitle styling -->
+    <string name="subtitle_style_title">Subtitle style</string>
+    <string name="subtitle_style_subtitle">Size, colour, background and edge</string>
+    <string name="subtitle_style_size">Text size</string>
+    <string name="subtitle_style_size_value">%1$d sp</string>
+    <string name="subtitle_style_color">Text colour</string>
+    <string name="subtitle_style_background">Background</string>
+    <string name="subtitle_style_edge">Edge</string>
+    <string name="subtitle_color_white">White</string>
+    <string name="subtitle_color_yellow">Yellow</string>
+    <string name="subtitle_color_cyan">Cyan</string>
+    <string name="subtitle_color_green">Green</string>
+    <string name="subtitle_bg_none">None</string>
+    <string name="subtitle_bg_translucent">See-through</string>
+    <string name="subtitle_bg_solid">Solid</string>
+    <string name="subtitle_edge_outline">Outline</string>
+    <string name="subtitle_edge_shadow">Drop shadow</string>
+    <string name="subtitle_edge_none">None</string>
+    <string name="subtitle_style_preview">This is how subtitles will look.</string>
+    <string name="subtitle_style_reset">Reset</string>
+    <string name="subtitle_style_smaller">Smaller</string>
+    <string name="subtitle_style_larger">Larger</string>
+
+    <!-- Touch gestures in the player -->
+    <string name="player_gesture_brightness">Brightness</string>
+    <string name="player_gesture_volume">Volume</string>
+    <string name="player_gesture_seek_back">−10 s</string>
+    <string name="player_gesture_seek_forward">+10 s</string>
 </resources>

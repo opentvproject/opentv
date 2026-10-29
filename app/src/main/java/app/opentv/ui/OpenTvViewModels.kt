@@ -231,16 +231,51 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
      */
     data class CategoryGroup(val key: String, val label: String, val ids: List<String>)
 
-    val categoryGroups: StateFlow<List<CategoryGroup>> =
+    /**
+     * Every folded category for the chosen provider, in the user's sort order — before the
+     * whitelist. What the category manager lists, so a category filtered out can be ticked back.
+     */
+    private val allCategoryGroups: StateFlow<List<CategoryGroup>> =
         combine(
             graph.catalogRepository.observeCategories(StreamKind.LIVE),
             selectedSource,
-        ) { raw, sourceId ->
+            settings.categorySortOrder,
+        ) { raw, sourceId, sortOrder ->
             // Scope the category rail to the chosen provider, so a second playlist's categories show
             // on their own (cardiodoc's "keep sources separate"); null folds across every provider.
             val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
-            foldCategories(scoped)
+            CategoryFiltering.sort(foldCategories(scoped), sortOrder) { it.label }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The rail's categories: [allCategoryGroups] narrowed to the user's whitelist. */
+    val categoryGroups: StateFlow<List<CategoryGroup>> =
+        combine(allCategoryGroups, settings.visibleCategoryKeys(StreamKind.LIVE)) { groups, whitelist ->
+            CategoryFiltering.applyWhitelist(groups, whitelist) { it.key }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Category ids filtered out by the whitelist. "All channels" drops their channels too, so a
+     * trimmed rail isn't undone by scrolling All; search and favourites still reach them.
+     */
+    private val excludedCategoryIds: StateFlow<Set<String>> =
+        combine(allCategoryGroups, settings.visibleCategoryKeys(StreamKind.LIVE)) { groups, whitelist ->
+            val excluded = CategoryFiltering.excludedKeys(groups, whitelist) { it.key }
+            groups.filter { it.key in excluded }.flatMap { it.ids }.toSet()
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** What the category manager lists: every category, minus parental-hidden ones while locked. */
+    val manageableCategoryGroups: StateFlow<List<CategoryGroup>> =
+        combine(allCategoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
+            if (unlocked) groups else groups.filter { it.key !in hidden }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val liveCategoryWhitelist: StateFlow<Set<String>> = settings.visibleCategoryKeys(StreamKind.LIVE)
+
+    /** Saves the manager's ticks over [scopeKeys] (the categories it listed) into the whitelist. */
+    fun saveCategoryWhitelist(scopeKeys: Set<String>, selected: Set<String>) {
+        val saved = settings.visibleCategoryKeys(StreamKind.LIVE).value
+        settings.setVisibleCategoryKeys(StreamKind.LIVE, CategoryFiltering.mergeWhitelist(saved, scopeKeys, selected))
+    }
 
     /**
      * Folds codec-split provider categories into one logical [CategoryGroup] each — 'UK| GENERAL
@@ -264,7 +299,9 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
      * marked adult — unless the session is unlocked, in which case nothing is hidden.
      */
     private val hiddenCategoryIds: StateFlow<Set<String>> =
-        combine(categoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
+        // From the unfiltered groups: a locked category must stay out of search and favourites even
+        // when the whitelist has also dropped it from the rail.
+        combine(allCategoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
             if (unlocked) emptySet()
             else groups.filter { it.key in hidden }.flatMap { it.ids }.toSet()
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -335,6 +372,8 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         val favs: Boolean,
         val query: String,
         val hiddenIds: Set<String>,
+        /** Whitelist-excluded category ids; only ever non-empty for the plain "All channels" view. */
+        val excludedIds: Set<String> = emptySet(),
     )
 
     /**
@@ -372,6 +411,10 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             val ids = category?.let { key -> groups.firstOrNull { it.key == key }?.ids }
             RowsKey(ids, favs, q, hidden)
         }
+            .combine(excludedCategoryIds) { key, excluded ->
+                val browsingAll = key.categoryIds == null && !key.favs && key.query.isBlank()
+                if (browsingAll) key.copy(excludedIds = excluded) else key
+            }
             .combine(selectedSource) { key, source -> key to source }
             .flatMapLatest { (key, source) ->
                 val channelFlow = when {
@@ -396,8 +439,8 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                     // Adult/hidden channels drop out everywhere they could otherwise leak —
                     // All, search and favourites — until the session is unlocked.
                     val visible =
-                        if (key.hiddenIds.isEmpty()) scoped
-                        else scoped.filter { it.categoryId !in key.hiddenIds }
+                        if (key.hiddenIds.isEmpty() && key.excludedIds.isEmpty()) scoped
+                        else scoped.filter { it.categoryId !in key.hiddenIds && it.categoryId !in key.excludedIds }
                     // Show the size-aware loading bar for the FIRST guide build only (start-up).
                     // After that the guide is built and flicking between categories is cheap, so
                     // don't flash a loading line on every tap — that bar was only ever meant for
@@ -768,19 +811,35 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
     // Category chips scoped to the chosen provider: pick a provider and you see only its categories,
     // and since a category id belongs to one provider, the grid you then open is already that
     // provider's titles. null folds categories across every provider ("All sources").
-    val movieCategories: StateFlow<List<Category>> =
-        combine(
-            graph.catalogRepository.observeCategories(StreamKind.MOVIE),
-            selectedVodSource,
-        ) { raw, sourceId -> if (sourceId == null) raw else raw.filter { it.sourceId == sourceId } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // The *all* lists are what the category manager offers (sorted, not whitelisted); the plain ones
+    // are what the chip strip shows.
+    val allMovieCategories: StateFlow<List<Category>> = scopedSortedCategories(StreamKind.MOVIE)
+    val allSeriesCategories: StateFlow<List<Category>> = scopedSortedCategories(StreamKind.SERIES)
+    val movieCategories: StateFlow<List<Category>> = whitelisted(allMovieCategories, StreamKind.MOVIE)
+    val seriesCategories: StateFlow<List<Category>> = whitelisted(allSeriesCategories, StreamKind.SERIES)
 
-    val seriesCategories: StateFlow<List<Category>> =
+    private fun scopedSortedCategories(kind: StreamKind): StateFlow<List<Category>> =
         combine(
-            graph.catalogRepository.observeCategories(StreamKind.SERIES),
+            graph.catalogRepository.observeCategories(kind),
             selectedVodSource,
-        ) { raw, sourceId -> if (sourceId == null) raw else raw.filter { it.sourceId == sourceId } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            settings.categorySortOrder,
+        ) { raw, sourceId, sortOrder ->
+            val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
+            CategoryFiltering.sort(scoped, sortOrder) { it.name }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private fun whitelisted(categories: StateFlow<List<Category>>, kind: StreamKind): StateFlow<List<Category>> =
+        combine(categories, settings.visibleCategoryKeys(kind)) { list, whitelist ->
+            CategoryFiltering.applyWhitelist(list, whitelist, ::vodCategoryKey)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun categoryWhitelist(kind: StreamKind): StateFlow<Set<String>> = settings.visibleCategoryKeys(kind)
+
+    /** Saves the manager's ticks over [scopeKeys] (the categories it listed) into [kind]'s whitelist. */
+    fun saveCategoryWhitelist(kind: StreamKind, scopeKeys: Set<String>, selected: Set<String>) {
+        val saved = settings.visibleCategoryKeys(kind).value
+        settings.setVisibleCategoryKeys(kind, CategoryFiltering.mergeWhitelist(saved, scopeKeys, selected))
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val movies: StateFlow<List<Movie>> = movieCategory

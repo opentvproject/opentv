@@ -54,7 +54,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import androidx.compose.ui.platform.LocalContext
+import app.opentv.core.AppSettings
 import app.opentv.data.model.Movie
+import app.opentv.data.model.StreamKind
+import app.opentv.ui.channels.CategoryManagerDialog
+import app.opentv.ui.channels.ManagedCategory
+import app.opentv.ui.vodCategoryKey
 import app.opentv.data.model.Series
 import app.opentv.data.model.Source
 import app.opentv.data.parser.displayTitle
@@ -95,6 +101,7 @@ fun MoviesScreen(
 
     // null = the curated home rows; a category id = that category's full grid.
     var browseCategory by remember { mutableStateOf<String?>(null) }
+    var showCategoryManager by remember { mutableStateOf(false) }
 
     val hasContent = resume.isNotEmpty() || recommended.isNotEmpty() ||
         recentlyAdded.isNotEmpty() || genreRows.isNotEmpty()
@@ -114,7 +121,11 @@ fun MoviesScreen(
             selected = browseCategory,
             onSelectHome = { browseCategory = null },
             onSelectCategory = { id -> browseCategory = id; viewModel.selectMovieCategory(id) },
+            onManage = { showCategoryManager = true },
         )
+        if (showCategoryManager) {
+            VodCategoryManager(StreamKind.MOVIE, viewModel) { showCategoryManager = false }
+        }
         // Weighted so the shelves fill the space under the fixed search + chips header, exactly and
         // unambiguously — the same reason Live TV weights its guide grid.
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -176,6 +187,7 @@ fun SeriesScreen(
     }
 
     var browseCategory by remember { mutableStateOf<String?>(null) }
+    var showCategoryManager by remember { mutableStateOf(false) }
 
     val hasContent = resume.isNotEmpty() || recentlyAdded.isNotEmpty() || genreRows.isNotEmpty()
 
@@ -194,7 +206,11 @@ fun SeriesScreen(
             selected = browseCategory,
             onSelectHome = { browseCategory = null },
             onSelectCategory = { id -> browseCategory = id; viewModel.selectSeriesCategory(id) },
+            onManage = { showCategoryManager = true },
         )
+        if (showCategoryManager) {
+            VodCategoryManager(StreamKind.SERIES, viewModel) { showCategoryManager = false }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 browseCategory != null -> SeriesCategoryGrid(categorySeries, onOpenSeries)
@@ -520,6 +536,7 @@ private fun CategoryChips(
     selected: String?,
     onSelectHome: () -> Unit,
     onSelectCategory: (String) -> Unit,
+    onManage: () -> Unit,
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
@@ -538,7 +555,27 @@ private fun CategoryChips(
         items(entries, key = { it.first }) { (id, name) ->
             Chip(name, selected == id) { onSelectCategory(id) }
         }
+        item(key = "manage") { Chip(stringResource(R.string.categories_manage_short), false, onManage) }
     }
+}
+
+/** The sort + whitelist dialog for the Movies or Shows category chips. */
+@Composable
+private fun VodCategoryManager(kind: StreamKind, viewModel: VodViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val settings = remember { AppSettings.get(context) }
+    val all by (if (kind == StreamKind.MOVIE) viewModel.allMovieCategories else viewModel.allSeriesCategories)
+        .collectAsState()
+    val whitelist by viewModel.categoryWhitelist(kind).collectAsState()
+    val sortOrder by settings.categorySortOrder.collectAsState()
+    CategoryManagerDialog(
+        categories = all.map { ManagedCategory(vodCategoryKey(it), it.name) },
+        whitelist = whitelist,
+        sortOrder = sortOrder,
+        onSortOrder = settings::setCategorySortOrder,
+        onSave = { scope, selected -> viewModel.saveCategoryWhitelist(kind, scope, selected) },
+        onDismiss = onDismiss,
+    )
 }
 
 /**

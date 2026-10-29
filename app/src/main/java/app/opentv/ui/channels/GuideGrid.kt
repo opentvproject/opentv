@@ -5,9 +5,11 @@
  */
 package app.opentv.ui.channels
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,11 +21,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -140,9 +145,13 @@ fun ChannelList(
     onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
     onExitLeftFromChannel: () -> Boolean = { false },
     modifier: Modifier = Modifier,
+    /** Touch only: a long-press, for when a tap plays straight away (the phone layout). */
+    onLongPressRow: ((ChannelsViewModel.Row) -> Unit)? = null,
+    state: LazyListState = rememberLazyListState(),
 ) {
     val now = System.currentTimeMillis()
     LazyColumn(
+        state = state,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -156,11 +165,13 @@ fun ChannelList(
                 onFocus = { onFocusRow(row) },
                 onToggleFavourite = { onToggleFavourite(row) },
                 onExitLeft = onExitLeftFromChannel,
+                onLongPress = onLongPressRow?.let { { it(row) } },
             )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class) // combinedClickable, for the phone layout's long-press
 @Composable
 private fun ChannelListRow(
     row: ChannelsViewModel.Row,
@@ -170,11 +181,13 @@ private fun ChannelListRow(
     onFocus: () -> Unit,
     onToggleFavourite: () -> Unit,
     onExitLeft: () -> Boolean,
+    onLongPress: (() -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer
@@ -192,7 +205,7 @@ private fun ChannelListRow(
                 focused = it.isFocused
                 if (it.isFocused) onFocus()
             }
-            .clickable(onClick = onSelect)
+            .combinedClickable(onClick = onSelect, onLongClick = onLongPress)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

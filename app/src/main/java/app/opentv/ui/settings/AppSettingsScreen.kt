@@ -48,6 +48,7 @@ import app.opentv.core.AppSettings
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.data.work.SyncWorker
+import app.opentv.ui.player.SubtitleStyleDialog
 
 /**
  * Display & playback preferences: the app-behaviour settings, kept apart from the guide/data
@@ -68,6 +69,8 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val liveEnabled by settings.liveEnabled.collectAsState()
     val moviesEnabled by settings.moviesEnabled.collectAsState()
     val seriesEnabled by settings.seriesEnabled.collectAsState()
+    val categorySortOrder by settings.categorySortOrder.collectAsState()
+    var showSubtitleStyle by remember { mutableStateOf(false) }
 
     // A refresh next to each content toggle kicks a full catalogue re-sync (which now honours the
     // toggles, so a type just switched on is fetched). Runs as background work so it isn't cut short
@@ -176,6 +179,25 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 channelLayout == AppSettings.ChannelLayout.LIST,
             ) { settings.setChannelLayout(AppSettings.ChannelLayout.LIST) }
             Spacer(Modifier.height(8.dp))
+            // Which categories show is picked per screen (Manage categories on the rail / chips);
+            // the order is one global choice, so it lives here too.
+            Text(
+                stringResource(R.string.categories_sort_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            ThemeOption(
+                stringResource(R.string.categories_sort_default),
+                categorySortOrder == AppSettings.CategorySortOrder.DEFAULT,
+            ) { settings.setCategorySortOrder(AppSettings.CategorySortOrder.DEFAULT) }
+            ThemeOption(
+                stringResource(R.string.categories_sort_az),
+                categorySortOrder == AppSettings.CategorySortOrder.NAME_ASC,
+            ) { settings.setCategorySortOrder(AppSettings.CategorySortOrder.NAME_ASC) }
+            ThemeOption(
+                stringResource(R.string.categories_sort_za),
+                categorySortOrder == AppSettings.CategorySortOrder.NAME_DESC,
+            ) { settings.setCategorySortOrder(AppSettings.CategorySortOrder.NAME_DESC) }
+            Spacer(Modifier.height(8.dp))
             ToggleRow(
                 title = stringResource(R.string.settings_live_preview_title),
                 subtitle = stringResource(R.string.settings_live_preview_subtitle),
@@ -199,6 +221,19 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 checked = captions,
                 onToggle = settings::setSubtitlesEnabled,
             )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { showSubtitleStyle = true }
+                    .padding(vertical = 4.dp),
+            ) {
+                Text(stringResource(R.string.subtitle_style_title), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.subtitle_style_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             ToggleRow(
                 title = stringResource(R.string.settings_resume_title),
                 subtitle = stringResource(R.string.settings_resume_subtitle),
@@ -214,6 +249,10 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         SleepTimerSection()
+    }
+
+    if (showSubtitleStyle) {
+        SubtitleStyleDialog(settings, onDismiss = { showSubtitleStyle = false })
     }
 }
 

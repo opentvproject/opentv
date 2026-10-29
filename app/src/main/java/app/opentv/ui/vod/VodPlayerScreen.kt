@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -76,7 +75,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -92,6 +90,10 @@ import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.player.PlayerController
+import app.opentv.ui.player.PlayerGestureLayer
+import app.opentv.ui.player.SubtitleStyleDialog
+import app.opentv.ui.player.collectSubtitleStyle
+import app.opentv.ui.player.applySubtitleStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -148,6 +150,8 @@ fun VodPlayerScreen(
     }
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
+    val subtitleStyle = collectSubtitleStyle(settings)
+    var showSubtitleStyle by remember { mutableStateOf(false) }
 
     var paused by remember { mutableStateOf(false) }
     var vodPanel by remember { mutableStateOf(VodPanel.NONE) }
@@ -283,10 +287,7 @@ fun VodPlayerScreen(
                 }
             }
             .focusRequester(rootFocus)
-            .focusable()
-            .pointerInput(Unit) {
-                detectTapGestures { if (controlsVisible) controlsVisible = false else reveal() }
-            },
+            .focusable(),
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -294,14 +295,20 @@ fun VodPlayerScreen(
                 PlayerView(ctx).apply {
                     player = controller.player
                     useController = false
-                    subtitleView?.setUserDefaultStyle()
-                    subtitleView?.setUserDefaultTextSize()
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                 }
             },
+            // Re-applied whenever the style changes, so captions restyle mid-playback.
+            update = { it.subtitleView?.applySubtitleStyle(subtitleStyle) },
+        )
+
+        // Touch: tap for the bar, double-tap left/right to skip, swipe for brightness/volume.
+        PlayerGestureLayer(
+            onToggleControls = { if (controlsVisible) controlsVisible = false else reveal() },
+            onSeekBy = { delta -> seekRelative(delta); true },
         )
 
         when (val current = state) {
@@ -358,6 +365,7 @@ fun VodPlayerScreen(
                         controller = controller,
                         tracks = tracks,
                         firstFocus = panelFocus,
+                        onSubtitleStyle = { vodPanel = VodPanel.NONE; showSubtitleStyle = true },
                         onDone = { vodPanel = VodPanel.NONE; interaction++ },
                     )
                     Spacer(Modifier.height(16.dp))
@@ -437,6 +445,10 @@ fun VodPlayerScreen(
             }
         }
     }
+
+    if (showSubtitleStyle) {
+        SubtitleStyleDialog(settings, onDismiss = { showSubtitleStyle = false; interaction++ })
+    }
 }
 
 @Composable
@@ -478,6 +490,7 @@ private fun TrackPanel(
     controller: PlayerController,
     tracks: Tracks,
     firstFocus: FocusRequester,
+    onSubtitleStyle: () -> Unit,
     onDone: () -> Unit,
 ) {
     val trackType = if (panel == VodPanel.SUBTITLES) C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
@@ -496,6 +509,9 @@ private fun TrackPanel(
                 controller.selectTrack(group, i); onDone()
             }
         }
+    }
+    if (panel == VodPanel.SUBTITLES) {
+        options += Triple(stringResource(R.string.subtitle_style_title), false, onSubtitleStyle)
     }
 
     Column(

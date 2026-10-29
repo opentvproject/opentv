@@ -6,6 +6,7 @@
 package app.opentv.core
 
 import android.content.Context
+import app.opentv.data.model.StreamKind
 import app.opentv.data.model.StremioAddon
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -285,6 +286,105 @@ class AppSettings private constructor(context: Context) {
         _playerResizeMode.value = mode
     }
 
+    // ---- Subtitle styling --------------------------------------------------------------------
+
+    /** Caption text colour, as ARGB. A short, high-contrast palette rather than a free picker. */
+    enum class SubtitleColor(val argb: Int) {
+        WHITE(0xFFFFFFFF.toInt()),
+        YELLOW(0xFFFFEB3B.toInt()),
+        CYAN(0xFF00E5FF.toInt()),
+        GREEN(0xFF00E676.toInt()),
+    }
+
+    /** The box drawn behind each caption line, as ARGB. */
+    enum class SubtitleBackground(val argb: Int) {
+        NONE(0x00000000),
+        TRANSLUCENT(0x80000000.toInt()),
+        SOLID(0xFF000000.toInt()),
+    }
+
+    /**
+     * How caption glyphs are edged to stay readable over a busy picture. Mapped onto Media3's
+     * CaptionStyleCompat edge types in the player, so this file stays free of any Media3 import.
+     */
+    enum class SubtitleEdge { OUTLINE, DROP_SHADOW, NONE }
+
+    /** Caption text size in sp. Fixed rather than relative, so it reads the same on a phone and a TV. */
+    private val _subtitleTextSizeSp =
+        MutableStateFlow(prefs.getInt(KEY_SUB_SIZE, SUBTITLE_SIZE_DEFAULT).coerceIn(SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX))
+    val subtitleTextSizeSp: StateFlow<Int> = _subtitleTextSizeSp.asStateFlow()
+
+    private val _subtitleTextColor = MutableStateFlow(readEnum(KEY_SUB_COLOR, SubtitleColor.WHITE))
+    val subtitleTextColor: StateFlow<SubtitleColor> = _subtitleTextColor.asStateFlow()
+
+    private val _subtitleBackground = MutableStateFlow(readEnum(KEY_SUB_BG, SubtitleBackground.NONE))
+    val subtitleBackground: StateFlow<SubtitleBackground> = _subtitleBackground.asStateFlow()
+
+    private val _subtitleEdge = MutableStateFlow(readEnum(KEY_SUB_EDGE, SubtitleEdge.OUTLINE))
+    val subtitleEdge: StateFlow<SubtitleEdge> = _subtitleEdge.asStateFlow()
+
+    fun setSubtitleTextSizeSp(sizeSp: Int) {
+        val s = sizeSp.coerceIn(SUBTITLE_SIZE_MIN, SUBTITLE_SIZE_MAX)
+        prefs.edit().putInt(KEY_SUB_SIZE, s).apply()
+        _subtitleTextSizeSp.value = s
+    }
+
+    fun setSubtitleTextColor(color: SubtitleColor) {
+        prefs.edit().putString(KEY_SUB_COLOR, color.name).apply()
+        _subtitleTextColor.value = color
+    }
+
+    fun setSubtitleBackground(background: SubtitleBackground) {
+        prefs.edit().putString(KEY_SUB_BG, background.name).apply()
+        _subtitleBackground.value = background
+    }
+
+    fun setSubtitleEdge(edge: SubtitleEdge) {
+        prefs.edit().putString(KEY_SUB_EDGE, edge.name).apply()
+        _subtitleEdge.value = edge
+    }
+
+    // ---- Category sorting & filtering --------------------------------------------------------
+
+    /**
+     * How category rails/chips are ordered: as the provider lists them, or alphabetically. One
+     * setting for Live, Movies and Shows alike — people who want A–Z want it everywhere.
+     */
+    enum class CategorySortOrder { DEFAULT, NAME_ASC, NAME_DESC }
+
+    private val _categorySortOrder = MutableStateFlow(readEnum(KEY_CAT_SORT, CategorySortOrder.DEFAULT))
+    val categorySortOrder: StateFlow<CategorySortOrder> = _categorySortOrder.asStateFlow()
+
+    fun setCategorySortOrder(order: CategorySortOrder) {
+        prefs.edit().putString(KEY_CAT_SORT, order.name).apply()
+        _categorySortOrder.value = order
+    }
+
+    /**
+     * The category whitelist for each content type. Empty = every category shows (the default,
+     * and what a brand-new provider category falls under); otherwise only the listed keys show.
+     * Kept per type so trimming the Live rail never empties the Movies chips. Keys are a live
+     * category's group key, or `sourceId:categoryId` for Movies/Shows. Separate from the parental
+     * [hiddenCategories], which is about locking content away rather than decluttering.
+     */
+    private val _visibleCategoryKeys: Map<StreamKind, MutableStateFlow<Set<String>>> =
+        StreamKind.entries.associateWith { kind ->
+            MutableStateFlow(prefs.getStringSet(visibleCategoriesKey(kind), emptySet())!!.toSet())
+        }
+
+    fun visibleCategoryKeys(kind: StreamKind): StateFlow<Set<String>> =
+        _visibleCategoryKeys.getValue(kind).asStateFlow()
+
+    fun setVisibleCategoryKeys(kind: StreamKind, keys: Set<String>) {
+        prefs.edit().putStringSet(visibleCategoriesKey(kind), keys).apply()
+        _visibleCategoryKeys.getValue(kind).value = keys.toSet()
+    }
+
+    private fun visibleCategoriesKey(kind: StreamKind) = "visible_categories_${kind.name.lowercase()}"
+
+    private inline fun <reified E : Enum<E>> readEnum(key: String, default: E): E =
+        runCatching { enumValueOf<E>(prefs.getString(key, null) ?: "") }.getOrDefault(default)
+
     private fun readThemeMode(): ThemeMode =
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "") }
             .getOrDefault(ThemeMode.SYSTEM)
@@ -485,6 +585,15 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_PAD_END = "rec_pad_end_min"
         private const val KEY_REC_AUTOSWITCH = "rec_auto_switch"
         private const val KEY_LIVE_PAUSE = "live_pause_enabled"
+        private const val KEY_SUB_SIZE = "subtitle_text_size_sp"
+        private const val KEY_SUB_COLOR = "subtitle_text_color"
+        private const val KEY_SUB_BG = "subtitle_background"
+        private const val KEY_SUB_EDGE = "subtitle_edge"
+        private const val KEY_CAT_SORT = "category_sort_order"
+
+        const val SUBTITLE_SIZE_MIN = 14
+        const val SUBTITLE_SIZE_MAX = 32
+        const val SUBTITLE_SIZE_DEFAULT = 20
 
         @Volatile private var instance: AppSettings? = null
 

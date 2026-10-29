@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,7 +81,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -139,6 +137,8 @@ fun PlayerScreen(
     val settings = remember { graph.settings }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val subtitlesDefault by settings.subtitlesEnabled.collectAsState()
+    val subtitleStyle = collectSubtitleStyle(settings)
+    var showSubtitleStyle by remember { mutableStateOf(false) }
     val controller = remember {
         PlayerController(
             context, scope, graph.streamingHttpClient,
@@ -394,10 +394,7 @@ fun PlayerScreen(
                 }
             }
             .focusRequester(rootFocus)
-            .focusable()
-            .pointerInput(Unit) {
-                detectTapGestures { if (controlsVisible) controlsVisible = false else reveal() }
-            },
+            .focusable(),
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -405,15 +402,32 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     player = controller.player
                     useController = false
-                    subtitleView?.setUserDefaultStyle()
-                    subtitleView?.setUserDefaultTextSize()
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                 }
             },
-            update = { it.resizeMode = resizeMode },
+            update = {
+                it.resizeMode = resizeMode
+                // Re-applied whenever the style changes, so captions restyle mid-playback.
+                it.subtitleView?.applySubtitleStyle(subtitleStyle)
+            },
+        )
+
+        // Touch: tap for the bar, double-tap to skip (when the stream can seek), swipe for
+        // brightness/volume. Below the bar and the channel list, so their own taps win.
+        PlayerGestureLayer(
+            onToggleControls = { if (controlsVisible) controlsVisible = false else reveal() },
+            onSeekBy = { delta ->
+                if (controller.isSeekable) {
+                    val p = controller.player
+                    p.seekTo((p.currentPosition + delta).coerceAtLeast(0L))
+                    true
+                } else {
+                    false
+                }
+            },
         )
 
         // The channel number as you type it, top-right, until it resolves.
@@ -505,6 +519,7 @@ fun PlayerScreen(
                         resizeMode = resizeMode,
                         onResize = { resizeMode = it; settings.setPlayerResizeMode(it) },
                         onTune = { tuneTo(it) },
+                        onSubtitleStyle = { panel = Panel.NONE; showSubtitleStyle = true },
                         firstFocus = panelFocus,
                         onDone = { panel = Panel.NONE; interaction++ },
                     )
@@ -639,6 +654,10 @@ fun PlayerScreen(
         }
     }
 
+    if (showSubtitleStyle) {
+        SubtitleStyleDialog(settings, onDismiss = { showSubtitleStyle = false; interaction++ })
+    }
+
     if (showBackgroundPrompt) {
         RecordingBackgroundDialog(
             onAllow = {
@@ -708,16 +727,20 @@ private fun OptionPanel(
     resizeMode: Int,
     onResize: (Int) -> Unit,
     onTune: (Channel) -> Unit,
+    onSubtitleStyle: () -> Unit,
     firstFocus: FocusRequester,
     onDone: () -> Unit,
 ) {
     val offLabel = stringResource(R.string.player_subtitles_off)
+    val styleLabel = stringResource(R.string.subtitle_style_title)
     val standardLabel = stringResource(R.string.player_quality_standard)
     val fitLabel = stringResource(R.string.player_aspect_fit)
     val fillLabel = stringResource(R.string.player_aspect_fill)
     val stretchLabel = stringResource(R.string.player_aspect_stretch)
     val options: List<Option> = when (panel) {
-        Panel.SUBTITLES -> buildSubtitleOptions(controller, settings, tracks, offLabel, onDone)
+        // The style entry closes the list: tracks first, since picking one is the common case.
+        Panel.SUBTITLES -> buildSubtitleOptions(controller, settings, tracks, offLabel, onDone) +
+            Option(styleLabel, false, onSubtitleStyle)
         Panel.AUDIO -> buildAudioOptions(controller, tracks, onDone)
         Panel.QUALITY -> variants.map { v ->
             Option(v.qualityLabel.ifEmpty { standardLabel }, v.id == currentId) { onTune(v); onDone() }
