@@ -217,11 +217,11 @@ class CatalogRepository(
     /** "Recently Added" series, newest first. Reactive. */
     fun recentlyAddedSeries(limit: Int = 30): Flow<List<Series>> = seriesDao.observeRecentlyAdded(limit)
 
-    /** Every movie, newest first — for a caller that wants to build its own groupings. */
-    suspend fun allMovies(): List<Movie> = withContext(Dispatchers.IO) { movieDao.all() }
+    /** Bounded movie set (newest first) for home feeds and groupings. Defaults to 2500 to protect RAM. */
+    suspend fun allMovies(limit: Int = 2500): List<Movie> = withContext(Dispatchers.IO) { movieDao.recent(limit) }
 
-    /** Every series, newest first. */
-    suspend fun allSeries(): List<Series> = withContext(Dispatchers.IO) { seriesDao.all() }
+    /** Bounded series set (newest first). Defaults to 2500 to protect RAM. */
+    suspend fun allSeries(limit: Int = 2500): List<Series> = withContext(Dispatchers.IO) { seriesDao.recent(limit) }
 
     /** How many movies / series are on disk — a cheap COUNT the home screen uses to tell "the
      *  library grew" from "unchanged since last open" without loading every row. */
@@ -235,11 +235,11 @@ class CatalogRepository(
      * are split on comma and pipe (see [splitGenres]).
      */
     suspend fun moviesByGenre(maxGenres: Int = 12, perGenre: Int = 30): List<GenreGroup<Movie>> =
-        withContext(Dispatchers.IO) { groupByGenre(movieDao.all(), Movie::genre, maxGenres, perGenre) }
+        withContext(Dispatchers.IO) { groupByGenre(movieDao.recent(2500), Movie::genre, maxGenres, perGenre) }
 
     /** Series grouped by genre for the by-genre home rows. See [moviesByGenre]. */
     suspend fun seriesByGenre(maxGenres: Int = 12, perGenre: Int = 30): List<GenreGroup<Series>> =
-        withContext(Dispatchers.IO) { groupByGenre(seriesDao.all(), Series::genre, maxGenres, perGenre) }
+        withContext(Dispatchers.IO) { groupByGenre(seriesDao.recent(2500), Series::genre, maxGenres, perGenre) }
 
     /**
      * Movies grouped by genre from an ALREADY-LOADED list — the single-scan path the home screen
@@ -263,7 +263,7 @@ class CatalogRepository(
      * only watched movies that carry no genre — it falls back to top-rated, then recently-added.
      */
     suspend fun recommendedMovies(profileId: Long, limit: Int = 30): List<Movie> =
-        withContext(Dispatchers.IO) { recommendFrom(movieDao.all(), watchedMovieIds(profileId), limit) }
+        withContext(Dispatchers.IO) { recommendFrom(movieDao.recent(2500), watchedMovieIds(profileId), limit) }
 
     /**
      * "Recommended for you" from an ALREADY-LOADED movie list — the single-scan path (see
@@ -320,8 +320,9 @@ class CatalogRepository(
         if (genres.isEmpty()) {
             return@withContext movieDao.similarByCategory(movie.sourceId, movie.categoryId, movie.id, limit)
         }
-        movieDao.all().asSequence()
-            .filter { it.id != movie.id }
+        val candidates = movieDao.candidatesForGenreMatching(movie.sourceId, movie.id, limit = 500)
+            .ifEmpty { movieDao.candidatesForGenreMatching(null, movie.id, limit = 500) }
+        candidates.asSequence()
             .map { it to sharedGenreCount(it.genre, genres) }
             .filter { it.second > 0 }
             .sortedWith(
@@ -382,8 +383,9 @@ class CatalogRepository(
         if (genres.isEmpty()) {
             return@withContext seriesDao.similarByCategory(series.sourceId, series.categoryId, series.id, limit)
         }
-        seriesDao.all().asSequence()
-            .filter { it.id != series.id }
+        val candidates = seriesDao.candidatesForGenreMatching(series.sourceId, series.id, limit = 500)
+            .ifEmpty { seriesDao.candidatesForGenreMatching(null, series.id, limit = 500) }
+        candidates.asSequence()
             .map { it to sharedGenreCount(it.genre, genres) }
             .filter { it.second > 0 }
             .sortedWith(

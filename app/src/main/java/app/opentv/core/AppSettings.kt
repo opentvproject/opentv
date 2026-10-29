@@ -96,7 +96,13 @@ class AppSettings private constructor(context: Context) {
 
     fun verifyPin(pin: String): Boolean {
         val stored = prefs.getString(KEY_PIN_HASH, null) ?: return true
-        return stored == hashPin(pin)
+        if (stored == hashPin(pin)) return true
+        if (stored == hashPinLegacy(pin)) {
+            // Transparently upgrade legacy single-pass SHA-256 to PBKDF2
+            setPin(pin)
+            return true
+        }
+        return false
     }
 
     fun setHiddenCategories(keys: Set<String>) {
@@ -108,7 +114,25 @@ class AppSettings private constructor(context: Context) {
         _hiddenUnlocked.value = unlocked
     }
 
+    /**
+     * PBKDF2WithHmacSHA256 with 50,000 iterations.
+     * Prevents offline dictionary attacks against 4-digit PINs (10,000 combinations).
+     */
     private fun hashPin(pin: String): String {
+        return runCatching {
+            val spec = javax.crypto.spec.PBEKeySpec(
+                pin.toCharArray(),
+                "opentv-parental-salt-2026".toByteArray(),
+                50_000,
+                256,
+            )
+            val skf = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val bytes = skf.generateSecret(spec).encoded
+            bytes.joinToString("") { "%02x".format(it) }
+        }.getOrElse { hashPinLegacy(pin) }
+    }
+
+    private fun hashPinLegacy(pin: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("opentv-pin::$pin".toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }

@@ -444,11 +444,20 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             // Walk every variant's guide-id candidates (override → provider → matched)
             // and use the first that actually has programmes. An id that never lights up
             // must not shadow a sibling variant whose id does.
-            val list = variants
-                .flatMap { it.epgCandidates }
-                .firstNotNullOfOrNull { id -> byEpgChannel[id] }
-                ?.sortedBy { it.startUtcMillis }
-                .orEmpty()
+            // Avoid intermediate list allocation and redundant sorting (observeWindow
+            // already delivers programmes sorted by startUtcMillis).
+            var matchedList: List<Programme>? = null
+            for (variant in variants) {
+                for (id in variant.epgCandidates) {
+                    val found = byEpgChannel[id]
+                    if (found != null) {
+                        matchedList = found
+                        break
+                    }
+                }
+                if (matchedList != null) break
+            }
+            val list = matchedList ?: emptyList()
 
             // Feed the progress bar as rows come together — this is the slow part on a big
             // provider, so it's what the percentage should actually track.

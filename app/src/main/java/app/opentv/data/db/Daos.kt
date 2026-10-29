@@ -257,34 +257,37 @@ interface ChannelDao {
         if (incoming.isEmpty()) return
 
         val existing = userStateForSource(sourceId).associateBy { it.streamId }
-        val merged = incoming.map { channel ->
-            val previous = existing[channel.streamId]
-            if (previous == null) {
-                channel.copy(lastSeenMillis = syncStamp)
-            } else {
-                channel.copy(
-                    id = previous.id,
-                    favourite = previous.favourite,
-                    // OR, not overwrite: the importer hides separator rows ('### UK ###')
-                    // at parse time, and that decision must stick even for rows that
-                    // predate the rule. User hides are preserved the same way.
-                    hidden = previous.hidden || channel.hidden,
-                    sortIndex = previous.sortIndex,
-                    // A user's rename must outlive the provider's fresh name on every refresh.
-                    customName = previous.customName,
-                    epgOverrideId = previous.epgOverrideId,
-                    matchedEpgId = previous.matchedEpgId,
-                    lastSeenMillis = syncStamp,
-                )
+        // Chunked so a 40,000-channel playlist avoids building both one enormous statement
+        // and a duplicate 40,000-element list in memory.
+        incoming.chunked(UPSERT_CHUNK).forEach { chunk ->
+            val prepared = chunk.map { channel ->
+                val previous = existing[channel.streamId]
+                if (previous == null) {
+                    channel.copy(lastSeenMillis = syncStamp)
+                } else {
+                    channel.copy(
+                        id = previous.id,
+                        favourite = previous.favourite,
+                        // OR, not overwrite: the importer hides separator rows ('### UK ###')
+                        // at parse time, and that decision must stick even for rows that
+                        // predate the rule. User hides are preserved the same way.
+                        hidden = previous.hidden || channel.hidden,
+                        sortIndex = previous.sortIndex,
+                        // A user's rename must outlive the provider's fresh name on every refresh.
+                        customName = previous.customName,
+                        epgOverrideId = previous.epgOverrideId,
+                        matchedEpgId = previous.matchedEpgId,
+                        lastSeenMillis = syncStamp,
+                    )
+                }
             }
+            upsertAll(prepared)
         }
-        // Chunked so a 40,000-channel playlist does not build one enormous statement.
-        merged.chunked(UPSERT_CHUNK).forEach { upsertAll(it) }
         deleteStale(sourceId, syncStamp)
     }
 
-    @Query("SELECT * FROM channels WHERE sourceId = :sourceId")
-    suspend fun userStateForSource(sourceId: Long): List<Channel>
+    @Query("SELECT id, streamId, favourite, hidden, sortIndex, customName, epgOverrideId, matchedEpgId FROM channels WHERE sourceId = :sourceId")
+    suspend fun userStateForSource(sourceId: Long): List<ChannelUserState>
 }
 
 @Dao
@@ -313,6 +316,18 @@ data class CategoryName(val id: String, val name: String)
 
 /** Projection for [ChannelDao.channelCountsByCategory]. */
 data class CategoryChannelCount(val sourceId: Long, val categoryId: String, val count: Int)
+
+/** Projection for [ChannelDao.userStateForSource]: minimal fields to preserve across catalogue refresh. */
+data class ChannelUserState(
+    val id: Long,
+    val streamId: String,
+    val favourite: Boolean,
+    val hidden: Boolean,
+    val sortIndex: Int,
+    val customName: String?,
+    val epgOverrideId: String?,
+    val matchedEpgId: String?,
+)
 
 @Dao
 interface EpgFeedDao {
@@ -447,6 +462,23 @@ interface MovieDao {
     @Query("SELECT * FROM movies ORDER BY addedMillis DESC")
     suspend fun all(): List<Movie>
 
+    /** Bounded newest-first query for home feed recommendation calculations. */
+    @Query("SELECT * FROM movies ORDER BY addedMillis DESC LIMIT :limit")
+    suspend fun recent(limit: Int): List<Movie>
+
+    /** Best-rated titles with genres for More-Like-This genre matching, avoiding full-table load. */
+    @Query(
+        """
+        SELECT * FROM movies
+        WHERE id != :excludeId
+          AND (:sourceId IS NULL OR sourceId = :sourceId)
+          AND genre IS NOT NULL AND genre != ''
+        ORDER BY rating DESC, addedMillis DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun candidatesForGenreMatching(sourceId: Long?, excludeId: Long, limit: Int = 500): List<Movie>
+
     /** How many movies are on disk. A cheap COUNT the home feeds use to tell "the library grew"
      *  from "same as last time" without loading every row (see VodViewModel.loadHomeFeeds). */
     @Query("SELECT COUNT(*) FROM movies")
@@ -539,6 +571,23 @@ interface SeriesDao {
     /** Every series, newest first — working set for the Kotlin-side by-genre / more-like-this feeds. */
     @Query("SELECT * FROM series ORDER BY addedMillis DESC")
     suspend fun all(): List<Series>
+
+    /** Bounded newest-first query for home feed recommendation calculations. */
+    @Query("SELECT * FROM series ORDER BY addedMillis DESC LIMIT :limit")
+    suspend fun recent(limit: Int): List<Series>
+
+    /** Best-rated titles with genres for More-Like-This genre matching, avoiding full-table load. */
+    @Query(
+        """
+        SELECT * FROM series
+        WHERE id != :excludeId
+          AND (:sourceId IS NULL OR sourceId = :sourceId)
+          AND genre IS NOT NULL AND genre != ''
+        ORDER BY rating DESC, addedMillis DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun candidatesForGenreMatching(sourceId: Long?, excludeId: Long, limit: Int = 500): List<Series>
 
     /** How many series are on disk — the cheap "did the library grow" check for the home feeds. */
     @Query("SELECT COUNT(*) FROM series")

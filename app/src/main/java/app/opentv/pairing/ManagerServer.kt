@@ -88,6 +88,8 @@ class ManagerServer(
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var serverSocket: ServerSocket? = null
+    private var workerPool: java.util.concurrent.ExecutorService? = null
+    private val failedTokenAttempts = java.util.concurrent.atomic.AtomicInteger(0)
     private var token: String = ""
     @Volatile private var running = false
     @Volatile private var lastActivityMillis = 0L
@@ -123,6 +125,7 @@ class ManagerServer(
         }
 
         serverSocket = socket
+        workerPool = java.util.concurrent.Executors.newFixedThreadPool(4)
         running = true
         lastActivityMillis = System.currentTimeMillis()
 
@@ -143,9 +146,16 @@ class ManagerServer(
                 } catch (_: Exception) {
                     break // socket closed, which is how we stop
                 }
-                runCatching { handle(client) }
-                    .onFailure { Log.w(TAG, "Manager request failed", it) }
-                runCatching { client.close() }
+                val pool = workerPool
+                if (pool != null && !pool.isShutdown) {
+                    pool.execute {
+                        runCatching { handle(client) }
+                            .onFailure { Log.w(TAG, "Manager request failed", it) }
+                        runCatching { client.close() }
+                    }
+                } else {
+                    runCatching { client.close() }
+                }
             }
         }
 
@@ -170,7 +180,10 @@ class ManagerServer(
         running = false
         runCatching { serverSocket?.close() }
         serverSocket = null
+        workerPool?.shutdownNow()
+        workerPool = null
         token = ""
+        failedTokenAttempts.set(0)
         if (_state.value is State.Listening) _state.value = State.Idle
     }
 
@@ -202,9 +215,20 @@ class ManagerServer(
         // Every route checks the token. Without it, none of this exists.
         val supplied = query["t"] ?: ""
         if (token.isEmpty() || !PairingHttp.secretsMatch(supplied, token)) {
+            val fails = failedTokenAttempts.incrementAndGet()
+            if (fails > 5) {
+                // Throttle repeated token brute-force attempts on the local network
+                try {
+                    Thread.sleep(500L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
             output.write(PairingHttp.httpResponse("404 Not Found", "text/plain", "Not found."))
             return
         }
+
+        failedTokenAttempts.set(0)
 
         // A valid request counts as activity; the idle watchdog measures from here.
         lastActivityMillis = System.currentTimeMillis()
