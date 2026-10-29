@@ -734,18 +734,35 @@ class CatalogRepository(
     }
 
     private suspend fun syncM3u(source: Source, nowUtcMillis: Long): SyncResult {
-        val request = Request.Builder()
-            .url(source.url)
-            .header("User-Agent", source.userAgent)
-            .build()
-
-        val parsed = http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                return SyncResult.Failed("Playlist download failed (HTTP ${response.code}).", null)
+        // A local playlist never goes near OkHttp: its URL has no host to connect to, and
+        // Request.Builder().url() rejects anything that is not http(s) outright.
+        val parsed = if (SourceRepository.isLocal(source.url)) {
+            val file = SourceRepository.localFile(source.url)
+                ?: return SyncResult.Failed("That is not a file path this app can open.", null)
+            when {
+                !file.exists() -> return SyncResult.Failed("No playlist file at ${file.path}.", null)
+                !file.isFile -> return SyncResult.Failed("${file.path} is a folder.", null)
+                !file.canRead() -> return SyncResult.Failed(
+                    "${file.path} cannot be read. A file under Android/data/app.opentv/files " +
+                        "needs no permission; elsewhere on shared storage it does.",
+                    null,
+                )
             }
-            val stream = response.body?.byteStream()
-                ?: return SyncResult.Failed("The playlist was empty.", null)
-            M3uParser.parse(stream, source.id)
+            file.inputStream().use { M3uParser.parse(it, source.id) }
+        } else {
+            val request = Request.Builder()
+                .url(source.url)
+                .header("User-Agent", source.userAgent)
+                .build()
+
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return SyncResult.Failed("Playlist download failed (HTTP ${response.code}).", null)
+                }
+                val stream = response.body?.byteStream()
+                    ?: return SyncResult.Failed("The playlist was empty.", null)
+                M3uParser.parse(stream, source.id)
+            }
         }
 
         if (parsed.channels.isEmpty()) {

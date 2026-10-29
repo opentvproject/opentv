@@ -10,6 +10,8 @@ import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.XtreamApi
+import java.io.File
+import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -51,7 +53,24 @@ class SourceRepository(
                         }
                     }
                 }
-                SourceKind.M3U -> "Playlist address looks valid. It will be checked on first sync."
+                SourceKind.M3U -> {
+                    val local = localFile(source.url)
+                    when {
+                        // A network playlist is still only checked on first sync: fetching it
+                        // here would download the whole thing twice to learn nothing new.
+                        local == null ->
+                            "Playlist address looks valid. It will be checked on first sync."
+                        !local.exists() -> error("No file at ${local.path}")
+                        !local.isFile -> error("${local.path} is a folder, not a playlist file")
+                        !local.canRead() -> error(
+                            "${local.path} cannot be read. A file under " +
+                                "Android/data/app.opentv/files needs no permission; elsewhere " +
+                                "on shared storage it does.",
+                        )
+                        local.length() == 0L -> error("${local.name} is empty")
+                        else -> "Found ${local.name} (${local.length()} bytes)."
+                    }
+                }
                 SourceKind.STALKER -> {
                     stalkerApi.handshakeTest(source.copy(url = normaliseUrl(source.url, source.kind)))
                     "Portal accepted the MAC address. Loading channels…"
@@ -75,6 +94,11 @@ class SourceRepository(
         fun normaliseUrl(raw: String, kind: SourceKind): String {
             var url = raw.trim()
             if (url.isEmpty()) return url
+            // A playlist can sit on the device itself — generated on a NAS and copied over, or
+            // merged from other lists on a PC. Those have no server to be fetched from, and
+            // prefixing a scheme turns file:///sdcard/x.m3u into http://file:///sdcard/x.m3u,
+            // which no loader can make sense of.
+            if (kind == SourceKind.M3U && isLocal(url)) return url
             if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
                 url = "http://$url"
             }
@@ -88,6 +112,34 @@ class SourceRepository(
                 .substringBefore("/get.php")
                 .substringBefore("/xmltv.php")
             return url.trimEnd('/')
+        }
+
+        /**
+         * Whether a playlist address is one the device can open by itself, with no network
+         * and no server anywhere.
+         *
+         * Only `file://` for now. It is the scheme that costs nothing: a playlist under the
+         * app's own external files directory — `Android/data/app.opentv/files/`, where a file
+         * copied over ADB or by a file manager naturally lands — is readable with no runtime
+         * permission at all, on every Android version.
+         */
+        fun isLocal(url: String): Boolean = url.trim().startsWith("file://", ignoreCase = true)
+
+        /**
+         * The file behind a `file://` playlist address, or null if the address is not one.
+         *
+         * Tries the strict URI form first so `%20` decodes, then falls back to the raw path:
+         * `URI()` rejects an unescaped space, and a filename is perfectly entitled to contain
+         * one. Nothing here touches the disk, so a caller still has to check [File.exists].
+         */
+        fun localFile(url: String): File? {
+            if (!isLocal(url)) return null
+            val trimmed = url.trim()
+            runCatching { File(URI(trimmed)) }.getOrNull()?.let { return it }
+            // isLocal already matched the prefix, case-insensitively, so its length is fixed.
+            val path = trimmed.substring("file://".length)
+            if (path.isEmpty()) return null
+            return File(if (path.startsWith("/")) path else "/$path")
         }
     }
 }

@@ -8,6 +8,7 @@ package app.opentv
 import app.opentv.data.model.SourceKind
 import app.opentv.data.repo.SourceRepository
 import com.google.common.truth.Truth.assertThat
+import java.io.File
 import org.junit.Test
 
 /**
@@ -64,5 +65,40 @@ class SourceUrlTest {
     @Test
     fun `an empty string stays empty`() {
         assertThat(SourceRepository.normaliseUrl("   ", SourceKind.XTREAM)).isEmpty()
+    }
+
+    @Test
+    fun `leaves a local playlist address alone`() {
+        // Regression guard. Prefixing a scheme turned file:///sdcard/x.m3u into
+        // http://file:///sdcard/x.m3u, and the loader never saw a path it could open.
+        val local = "file:///sdcard/Android/data/app.opentv/files/playlist.m3u"
+
+        assertThat(SourceRepository.normaliseUrl(local, SourceKind.M3U)).isEqualTo(local)
+    }
+
+    @Test
+    fun `recognises which addresses are local`() {
+        assertThat(SourceRepository.isLocal("file:///sdcard/playlist.m3u")).isTrue()
+        assertThat(SourceRepository.isLocal("FILE:///sdcard/playlist.m3u")).isTrue()
+        assertThat(SourceRepository.isLocal("  file:///sdcard/playlist.m3u  ")).isTrue()
+        assertThat(SourceRepository.isLocal("http://example.com/playlist.m3u")).isFalse()
+        assertThat(SourceRepository.isLocal("example.com/playlist.m3u")).isFalse()
+    }
+
+    @Test
+    fun `resolves a local path, spaces and all`() {
+        assertThat(SourceRepository.localFile("file:///sdcard/playlist.m3u"))
+            .isEqualTo(File("/sdcard/playlist.m3u"))
+        // URI() rejects an unescaped space; a filename is entitled to contain one.
+        assertThat(SourceRepository.localFile("file:///sdcard/my playlist.m3u"))
+            .isEqualTo(File("/sdcard/my playlist.m3u"))
+        // The escaped form has to land on the same file.
+        assertThat(SourceRepository.localFile("file:///sdcard/my%20playlist.m3u"))
+            .isEqualTo(File("/sdcard/my playlist.m3u"))
+    }
+
+    @Test
+    fun `a network playlist has no local file`() {
+        assertThat(SourceRepository.localFile("http://example.com/playlist.m3u")).isNull()
     }
 }

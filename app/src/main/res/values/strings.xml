@@ -362,7 +362,7 @@
     <string name="onboarding_playlist_url">Playlist URL</string>
     <string name="onboarding_portal_url">Portal URL</string>
     <string name="onboarding_server_help">For example http://example.com:8080 — paste the whole line from your provider if it\'s easier, extra bits get trimmed.</string>
-    <string name="onboarding_playlist_help">The full http link to your .m3u or .m3u8 file.</string>
+    <string name="onboarding_playlist_help">The http link to your .m3u or .m3u8 file, or a file:// path to one stored on this device.</string>
     <string name="onboarding_portal_help">The portal address from your provider, e.g. http://host:port/c/ — extra bits get trimmed.</string>
     <string name="onboarding_mac_address">MAC address</string>
     <string name="onboarding_mac_help">The MAC your provider tied to your line, e.g. 00:1A:79:xx:xx:xx.</string>
