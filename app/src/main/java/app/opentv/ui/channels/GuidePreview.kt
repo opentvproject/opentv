@@ -46,11 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
-import app.opentv.R
-import app.opentv.data.model.shownName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import app.opentv.R
+import app.opentv.data.model.shownName
 import app.opentv.ui.ChannelsViewModel
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
@@ -84,6 +84,7 @@ fun GuidePreview(
     onRefresh: () -> Unit,
     onAddSource: () -> Unit,
     previewPlayer: ExoPlayer?,
+    previewState: app.opentv.player.PlayerController.State = app.opentv.player.PlayerController.State.Idle,
     isRecording: Boolean = false,
     onRecord: () -> Unit = {},
     dayLabel: String = "",
@@ -98,7 +99,6 @@ fun GuidePreview(
             .height(212.dp)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        // ---- Logo / "watch" card ----------------------------------------------------------
         Box(
             Modifier
                 .fillMaxHeight()
@@ -108,7 +108,6 @@ fun GuidePreview(
                 .clickable(onClick = onWatch),
             contentAlignment = Alignment.Center,
         ) {
-            // Logo sits behind everything as the fallback / shutter.
             if (row != null) {
                 AsyncImage(
                     model = row.primary.logoUrl,
@@ -117,8 +116,6 @@ fun GuidePreview(
                 )
             }
 
-            // Live video on top of the logo when preview playback is on. The transparent
-            // shutter means the logo behind shows through until the first frame arrives.
             if (previewPlayer != null && row != null) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -137,6 +134,8 @@ fun GuidePreview(
                     },
                     update = { it.player = previewPlayer },
                 )
+
+                app.opentv.ui.player.PlaybackOverlay(state = previewState, compact = true)
             }
 
             Row(
@@ -160,11 +159,8 @@ fun GuidePreview(
 
         Spacer(Modifier.width(18.dp))
 
-        // ---- Now / next detail ------------------------------------------------------------
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // ---- Day navigation (Sky Q-style): ‹ Today › ----------------------------
-                // Only shown once the caller wires a label in; keeps older callers unchanged.
                 if (dayLabel.isNotEmpty()) {
                     IconButton(onClick = onPrevDay, enabled = canGoPrevDay) {
                         Icon(
@@ -190,9 +186,6 @@ fun GuidePreview(
                 Spacer(Modifier.weight(1f))
                 if (row != null) {
                     IconButton(onClick = onRecord) {
-                        // Red throughout — the record convention — but the glyph switches to a
-                        // stop square while a recording is running, so a press visibly does
-                        // something (● start → ■ stop) rather than looking inert.
                         Icon(
                             if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
                             contentDescription = if (isRecording) stringResource(R.string.guide_cd_stop_recording) else stringResource(R.string.guide_cd_record_now),

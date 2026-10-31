@@ -91,7 +91,7 @@ class PlayerController(
 
     sealed interface State {
         data object Idle : State
-        data class Buffering(val title: String) : State
+        data class Buffering(val title: String, val retryAttempt: Int = 0) : State
         data class Playing(val title: String) : State
         /** Playback stopped and retries are exhausted. [message] is written for humans. */
         data class Error(val title: String, val message: String, val canRetry: Boolean) : State
@@ -116,6 +116,13 @@ class PlayerController(
     private var switchJob: Job? = null
     private var current: Request? = null
     private var consecutiveFailures = 0
+
+    /**
+     * True from the moment a channel switch is requested until the new media item has been handed
+     * to the player. While set, events from the *outgoing* stream (a late READY, a rebuffer) are
+     * ignored so they cannot hide the loading overlay for the channel we are switching to.
+     */
+    @Volatile private var tuning = false
 
     /**
      * Held so the User-Agent can be swapped per source before each tune.
@@ -220,9 +227,10 @@ class PlayerController(
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (tuning) return
                     val title = current?.title.orEmpty()
                     _state.value = when (playbackState) {
-                        Player.STATE_BUFFERING -> State.Buffering(title)
+                        Player.STATE_BUFFERING -> State.Buffering(title, retryAttempt = consecutiveFailures)
                         Player.STATE_READY -> {
                             consecutiveFailures = 0
                             State.Playing(title)
@@ -236,18 +244,22 @@ class PlayerController(
                 override fun onPlayerError(error: PlaybackException) {
                     consecutiveFailures++
                     val request = current
-                    _state.value = State.Error(
-                        title = request?.title.orEmpty(),
-                        message = PlaybackErrors.describe(error),
-                        canRetry = consecutiveFailures < MAX_AUTO_RESTARTS,
-                    )
-                    // One silent restart covers the common case of a provider dropping the
-                    // connection when another device on the account starts streaming.
-                    if (consecutiveFailures < MAX_AUTO_RESTARTS && request != null) {
+                    if (request != null && consecutiveFailures < MAX_AUTO_RESTARTS) {
+                        // A silent restart covers the common case of a provider dropping the
+                        // connection when another device on the account starts streaming. Show
+                        // "retrying" rather than an error that is about to clear itself.
+                        _state.value = State.Buffering(request.title, retryAttempt = consecutiveFailures)
                         scope.launch {
                             delay(AUTO_RESTART_DELAY_MILLIS)
-                            if (current == request) play(request, debounce = false)
+                            if (current == request) tune(request, debounce = false, autoRestart = true)
                         }
+                    } else {
+                        // Retries exhausted: this is the failure the viewer should see.
+                        _state.value = State.Error(
+                            title = request?.title.orEmpty(),
+                            message = PlaybackErrors.describe(error),
+                            canRetry = true,
+                        )
                     }
                 }
             })
@@ -259,18 +271,29 @@ class PlayerController(
      * @param debounce when true (the default for channel surfing) the switch waits briefly so
      * that rapid presses collapse into a single tune. Pass false for a deliberate selection.
      */
-    fun play(request: Request, debounce: Boolean = true) {
+    fun play(request: Request, debounce: Boolean = true) = tune(request, debounce, autoRestart = false)
+
+    /**
+     * [autoRestart] is true only for the controller's own silent retry after a failure. It must
+     * *not* reset [consecutiveFailures] — resetting it there meant the retry budget never ran
+     * out, so a dead channel looped forever and never reached the Error state.
+     */
+    private fun tune(request: Request, debounce: Boolean, autoRestart: Boolean) {
         // Cancelling here is what makes fast channel-changing safe: the previous switch never
         // reaches the player, so we never stack prepares.
         switchJob?.cancel()
         current = request
+        if (!autoRestart) consecutiveFailures = 0
+
+        // Show the loading state straight away, not after the debounce: the viewer pressed a
+        // button and the screen should acknowledge it even though the actual tune is deferred.
+        tuning = true
+        _state.value = State.Buffering(request.title, retryAttempt = if (autoRestart) consecutiveFailures else 0)
 
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
 
-            consecutiveFailures = 0
             httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
-            _state.value = State.Buffering(request.title)
 
             val mediaItem = MediaItem.Builder()
                 .setUri(request.url)
@@ -297,6 +320,7 @@ class PlayerController(
                 playWhenReady = true
                 prepare()
             }
+            tuning = false
         }
     }
 
@@ -354,6 +378,9 @@ class PlayerController(
 
     val isSeekable: Boolean get() = player.isCurrentMediaItemSeekable
 
+    /** How many silent retries follow a failure before the Error state is shown (for "Retrying n of m"). */
+    val autoRetryLimit: Int get() = MAX_AUTO_RESTARTS - 1
+
     private fun firstSupportedIndex(group: Tracks.Group): Int {
         for (i in 0 until group.length) if (group.isTrackSupported(i)) return i
         return 0
@@ -362,6 +389,7 @@ class PlayerController(
     fun stop() {
         switchJob?.cancel()
         current = null
+        tuning = false
         player.stop()
         player.clearMediaItems()
         _state.value = State.Idle

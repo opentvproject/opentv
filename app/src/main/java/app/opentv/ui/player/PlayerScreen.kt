@@ -54,8 +54,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -86,7 +84,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -115,18 +112,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/**
- * Full-screen live playback.
- *
- * The video fills the screen with no chrome. A single control bar slides up from the bottom and
- * holds everything — transport (play/pause, rewind, forward), and pickers for subtitles, audio,
- * quality and aspect ratio. It hides after a few seconds and any remote button brings it back.
- * Nothing is ever left permanently painted over the picture.
- *
- * Subtitles and audio come from the actual tracks in the stream ([PlayerController.tracks]) and
- * are selected explicitly — that is the fix for "captions on but nothing shows", which happens
- * when the renderer is merely enabled and left to guess a language.
- */
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
@@ -143,19 +128,13 @@ fun PlayerScreen(
         PlayerController(
             context, scope, graph.streamingHttpClient,
             subtitlesEnabled = settings.subtitlesEnabled.value,
-            // Opt-in shallow DVR so the transport's pause/rewind actually holds on a live stream.
             dvr = settings.livePauseEnabled.value,
         )
     }
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
-    // What's recording right now, so the Record button can show as armed for this channel.
     val activeRecordings by graph.recordingRepository.observeActive().collectAsState(initial = emptyList())
 
-    // Hold the screen awake while the player is on screen. A view-level keepScreenOn flag isn't
-    // reliable on every TV box, so we set the window flag on the Activity directly — that's what
-    // actually stops the system screensaver from firing mid-programme. keepScreenOn stays on too,
-    // as a belt-and-braces backstop.
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -170,9 +149,7 @@ fun PlayerScreen(
 
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
-    // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
-    // Digits typed on the remote accumulate here, then jump to that channel number after a beat.
     var numberEntry by remember { mutableStateOf("") }
     var paused by remember { mutableStateOf(false) }
     var resizeMode by remember { mutableIntStateOf(settings.playerResizeMode.value) }
@@ -181,12 +158,8 @@ fun PlayerScreen(
     var panel by remember { mutableStateOf(Panel.NONE) }
     var channelListVisible by remember { mutableStateOf(false) }
     var interaction by remember { mutableIntStateOf(0) }
-    // Offered once per session the first time the user records here while OpenTV isn't exempt from
-    // battery optimisation, so the capture survives the screen sleeping. Never blocks recording.
     var showBackgroundPrompt by remember { mutableStateOf(false) }
 
-    // Picture-in-picture. While the player is on it is "eligible" to shrink to a floating window
-    // (pressing Home does it, handled in MainActivity); [inPip] drives hiding all the chrome.
     val inPip by app.opentv.core.PipState.inPip.collectAsState()
     val pipSupported = remember {
         android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
@@ -207,8 +180,6 @@ fun PlayerScreen(
     val rootFocus = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
 
-    // The channel list you were browsing, for channel up/down and the in-player list. Snapshotted
-    // on entry so it doesn't shift under you mid-session.
     val queue = remember { PlaybackQueue.items }
 
     fun reveal() {
@@ -222,7 +193,6 @@ fun PlayerScreen(
         settings.lastChannelId = channel.id
         scope.launch {
             val source = graph.sourceRepository.byId(channel.sourceId)
-            // Xtream/M3U carry a ready URL; a Stalker channel's URL is minted here from its cmd.
             val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
             controller.play(
                 PlayerController.Request(
@@ -237,8 +207,6 @@ fun PlayerScreen(
     }
 
     fun playChannelId(id: Long) {
-        // Remember where we came from so "Last channel" can bounce straight back. Quality switches
-        // go through tuneTo directly, so they never count as a channel change here.
         currentId?.let { if (it != id) previousId = it }
         scope.launch {
             val channel = graph.catalogRepository.channel(id) ?: return@launch
@@ -276,8 +244,6 @@ fun PlayerScreen(
         tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
     }
 
-    // Sleep timer: when the armed deadline passes, stop and leave the player. Re-arming from
-    // settings restarts this effect with the new deadline.
     val sleepDeadline by SleepTimer.deadline.collectAsState()
     LaunchedEffect(sleepDeadline) {
         val d = sleepDeadline ?: return@LaunchedEffect
@@ -288,8 +254,6 @@ fun PlayerScreen(
         onBack()
     }
 
-    // Apply the saved captions default once the stream's tracks arrive. Only auto-selects when
-    // nothing is chosen yet, so it never overrides a track the user picked by hand.
     LaunchedEffect(tracks) {
         val hasText = tracks.groups.any { it.type == C.TRACK_TYPE_TEXT }
         val textChosen = tracks.groups.any { g ->
@@ -298,7 +262,6 @@ fun PlayerScreen(
         if (subtitlesDefault && hasText && !textChosen) controller.setSubtitlesEnabled(true)
     }
 
-    // Auto-hide the bar after a few seconds — but never while paused or with a picker open.
     LaunchedEffect(controlsVisible, interaction, state, paused, panel) {
         if (controlsVisible && !paused && panel == Panel.NONE &&
             state is PlayerController.State.Playing
@@ -308,8 +271,6 @@ fun PlayerScreen(
         }
     }
 
-    // Focus: a picker's first row when one is open, otherwise the bar, otherwise the full-screen
-    // catcher (so the next remote press brings the bar back).
     LaunchedEffect(controlsVisible, panel) {
         if (controlsVisible) {
             delay(40)
@@ -319,10 +280,6 @@ fun PlayerScreen(
         }
     }
 
-    // Back steps back out one layer at a time — channel list, then picker, then the control bar —
-    // and only leaves the player once nothing is on screen. From immersive it's a single press out,
-    // so it never traps you, but it also no longer throws you all the way to the guide just because
-    // you wanted to dismiss the bar.
     BackHandler {
         when {
             channelListVisible -> channelListVisible = false
@@ -335,7 +292,6 @@ fun PlayerScreen(
         }
     }
 
-    // Number entry: once digits stop coming, jump to that channel number in the browsing list.
     LaunchedEffect(numberEntry) {
         if (numberEntry.isEmpty()) return@LaunchedEffect
         delay(NUMBER_ENTRY_TIMEOUT_MILLIS)
@@ -345,7 +301,6 @@ fun PlayerScreen(
         if (target != null) playChannelId(target.id)
     }
 
-    // Focus the channel list when it opens; hand focus back to the video catcher when it closes.
     LaunchedEffect(channelListVisible) {
         if (channelListVisible) {
             delay(40)
@@ -353,6 +308,10 @@ fun PlayerScreen(
         } else if (!controlsVisible) {
             runCatching { rootFocus.requestFocus() }
         }
+    }
+
+    LaunchedEffect(state is PlayerController.State.Error) {
+        if (state is PlayerController.State.Error) controlsVisible = false
     }
 
     Box(
@@ -363,29 +322,25 @@ fun PlayerScreen(
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val digit = keyToDigit(event.key)
                 when {
-                    // Never swallow Back/Escape — they must reach the back handler.
                     event.key == Key.Back || event.key == Key.Escape -> false
-                    // Typing a channel number jumps to it, TiviMate-style.
                     digit != null -> {
                         numberEntry = (numberEntry + digit).take(4)
                         reveal(); interaction++; true
                     }
-                    // A picker or the channel list owns the whole d-pad while it's up.
                     channelListVisible || panel != Panel.NONE -> {
                         interaction++
                         false
                     }
-                    // Channel up/down works whether or not the bar is showing — this remote has no
-                    // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the bar as a
-                    // channel banner, then it auto-hides.
                     event.key == Key.DirectionUp || event.key == Key.ChannelUp -> { zapBy(-1); reveal(); true }
                     event.key == Key.DirectionDown || event.key == Key.ChannelDown -> { zapBy(1); reveal(); true }
-                    // With the bar up, left/right drive its buttons; let them through.
+                    !controlsVisible && state is PlayerController.State.Error &&
+                        (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter) -> {
+                        controller.retry(); true
+                    }
                     controlsVisible -> {
                         interaction++
                         false
                     }
-                    // Immersive: left opens the channel list, right the quality picker.
                     event.key == Key.DirectionLeft -> { if (queue.isNotEmpty()) channelListVisible = true; true }
                     event.key == Key.DirectionRight -> {
                         if (variants.size > 1) { reveal(); panel = Panel.QUALITY }; true
@@ -416,7 +371,6 @@ fun PlayerScreen(
             update = { it.resizeMode = resizeMode },
         )
 
-        // The channel number as you type it, top-right, until it resolves.
         if (numberEntry.isNotEmpty() && !inPip) {
             Box(
                 Modifier
@@ -430,43 +384,11 @@ fun PlayerScreen(
             }
         }
 
-        when (val current = state) {
-            is PlayerController.State.Buffering -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text(current.title, color = Color.White)
-                    }
-                }
-            }
-
-            is PlayerController.State.Error -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.85f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(48.dp),
-                    ) {
-                        Text(current.title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            current.message,
-                            color = Color.White.copy(alpha = 0.85f),
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(24.dp))
-                        Button(onClick = { controller.retry() }) { Text(stringResource(R.string.common_try_again)) }
-                    }
-                }
-            }
-
-            else -> Unit
-        }
+        PlaybackOverlay(
+            state = state,
+            maxRetries = controller.autoRetryLimit,
+            onRetry = { controller.retry() },
+        )
 
         val channelTitle = when (val s = state) {
             is PlayerController.State.Buffering -> s.title
@@ -485,15 +407,11 @@ fun PlayerScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))))
-                    // Keep the controls clear of the phone/tablet system nav bar (and the side nav
-                    // bar / display cutout in landscape). Zero on a TV, so the 10-foot layout is
-                    // unchanged; the gradient above stays full-bleed to the screen edge.
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
                     )
                     .padding(horizontal = 28.dp, vertical = 20.dp),
             ) {
-                // The open picker sits above the transport row.
                 if (panel != Panel.NONE) {
                     OptionPanel(
                         panel = panel,
@@ -583,7 +501,6 @@ fun PlayerScreen(
             }
         }
 
-        // Left-side transparent channel list — d-pad Left opens it, pick a channel to switch.
         AnimatedVisibility(
             visible = channelListVisible && !inPip,
             enter = fadeIn(),
@@ -607,7 +524,6 @@ fun PlayerScreen(
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                // A quick "jump back to the channel you just left" pin, TiviMate-style.
                 val lastItem = previousId?.let { pid -> queue.firstOrNull { it.id == pid } }
                 if (lastItem != null && lastItem.id != currentId) {
                     ChannelListRow(
@@ -675,8 +591,6 @@ private fun ChannelListRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // A "Last" tag, or the channel number if the provider gives one — a fixed-width slot so
-        // the logos and names line up down the list.
         Text(
             leadingLabel ?: item.number?.toString().orEmpty(),
             style = MaterialTheme.typography.labelMedium,
@@ -844,7 +758,7 @@ private fun OptionRow(
     val bg = if (focused) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.08f)
     val fg = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
     Row(
-        modifier = Modifier
+        Modifier
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
@@ -901,7 +815,6 @@ private fun BarChip(
 private const val CONTROLS_TIMEOUT_MILLIS = 5_000L
 private const val NUMBER_ENTRY_TIMEOUT_MILLIS = 2_000L
 
-/** Maps a remote's number keys (top row and numeric keypad) to a digit, or null for other keys. */
 private fun keyToDigit(key: Key): Char? = when (key) {
     Key.Zero, Key.NumPad0 -> '0'
     Key.One, Key.NumPad1 -> '1'

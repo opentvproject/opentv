@@ -46,8 +46,6 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -80,7 +78,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
@@ -92,6 +89,7 @@ import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.player.PlayerController
+import app.opentv.ui.player.PlaybackOverlay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,14 +98,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * Plays a movie or episode: a single non-live stream, with resume and a proper transport bar.
- *
- * The bar is drawn in Compose rather than left to the Media3 view's own controller, because that
- * controller needs the embedded view to hold d-pad focus to be summoned — which it doesn't, on a
- * TV inside Compose, so it reads as "no controls". This is the same self-drawn, auto-hiding bar as
- * the live player, with a seek bar added since a film needs scrubbing.
- */
 @OptIn(UnstableApi::class)
 @Composable
 fun VodPlayerScreen(
@@ -122,24 +112,15 @@ fun VodPlayerScreen(
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
-    // A recording that's still being written plays through the tail-following source. It behaves a
-    // little differently in the transport: the "length" is how much has been recorded so far, which
-    // keeps growing, and seeking is bounded to that recorded extent.
     val growingRec = remember(streamUrl) { streamUrl.startsWith("optvrec://") }
-    // The SMB source lets a recording stored on a NAS play and seek in-app; harmless for the
-    // http/file URLs of ordinary VOD.
     val controller = remember {
         PlayerController(
             context, scope, graph.streamingHttpClient, subtitlesEnabled = false,
             smbDataSourceFactory = app.opentv.player.SmbDataSource.Factory(graph.settings),
-            // Lets an `optvrec://<id>` recording play while it's still being written.
-            growingDataSourceFactory =
-                app.opentv.player.GrowingRecordingDataSource.Factory(context.applicationContext),
+            growingDataSourceFactory = app.opentv.player.GrowingRecordingDataSource.Factory(context.applicationContext),
             liveRecording = growingRec,
         )
     }
-    // Skip forward/back within the recorded portion. For a growing recording ExoPlayer won't report
-    // the item as seekable (no fixed length), so we seek directly, clamped to what's on disk.
     fun seekRelative(deltaMs: Long) {
         val p = controller.player
         val ceiling = if (growingRec) p.bufferedPosition.coerceAtLeast(0L)
@@ -158,31 +139,14 @@ fun VodPlayerScreen(
     var scrubValue by remember { mutableFloatStateOf(0f) }
 
     var controlsVisible by remember { mutableStateOf(true) }
-    var interaction by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var interaction by remember { mutableIntStateOf(0) }
     val barFocus = remember { FocusRequester() }
     val rootFocus = remember { FocusRequester() }
 
     fun reveal() { controlsVisible = true; interaction++ }
 
-    suspend fun savePosition() {
-        val player = controller.player
-        val pos = player.currentPosition
-        val dur = player.duration.takeIf { it > 0 } ?: return
-        if (pos > 5_000) {
-            graph.playbackPositions.upsert(
-                app.opentv.data.model.PlaybackPosition(
-                    profileId = settings.activeProfileId.value,
-                    mediaKey = mediaKey,
-                    positionMillis = pos,
-                    durationMillis = dur,
-                    updatedAtMillis = System.currentTimeMillis(),
-                ),
-            )
-        }
-    }
+    suspend fun savePosition() { ... }
 
-    // Keep the screen awake during playback — see the note in PlayerScreen; a film is exactly when
-    // the screensaver must not fire. Window flag is the reliable path; keepScreenOn is a backstop.
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -215,7 +179,6 @@ fun VodPlayerScreen(
         }
     }
 
-    // Sleep timer: leave the film when the armed deadline passes (position is saved on dispose).
     val sleepDeadline by SleepTimer.deadline.collectAsState()
     LaunchedEffect(sleepDeadline) {
         val d = sleepDeadline ?: return@LaunchedEffect
@@ -225,13 +188,10 @@ fun VodPlayerScreen(
         onBack()
     }
 
-    // Poll position/duration for the seek bar while the film plays.
     LaunchedEffect(Unit) {
         while (isActive) {
             if (!scrubbing) {
                 positionMs = controller.player.currentPosition.coerceAtLeast(0)
-                // A growing recording has no fixed length; the recorded-so-far extent (how far you
-                // can skip ahead) is what's been read into the buffer.
                 durationMs = if (growingRec) controller.player.bufferedPosition.coerceAtLeast(0)
                 else controller.player.duration.takeIf { it > 0 } ?: 0
             }
@@ -239,9 +199,6 @@ fun VodPlayerScreen(
         }
     }
 
-    // Auto-hide when playing and not paused/scrubbing and no picker open. A growing recording dips in
-    // and out of Buffering as it rides the write head, so for that case Buffering counts as "playing"
-    // here — otherwise a single hiccup would pin the transport bar on screen for the rest of the watch.
     LaunchedEffect(controlsVisible, interaction, state, paused, scrubbing, vodPanel) {
         val activelyPlaying = state is PlayerController.State.Playing ||
             (growingRec && state is PlayerController.State.Buffering)
@@ -304,35 +261,11 @@ fun VodPlayerScreen(
             },
         )
 
-        when (val current = state) {
-            is PlayerController.State.Buffering ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text(current.title, color = Color.White)
-                    }
-                }
-
-            is PlayerController.State.Error ->
-                Box(
-                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(48.dp),
-                    ) {
-                        Text(current.title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                        Spacer(Modifier.height(12.dp))
-                        Text(current.message, color = Color.White.copy(alpha = 0.85f), textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(24.dp))
-                        Button(onClick = { controller.retry() }) { Text(stringResource(R.string.common_try_again)) }
-                    }
-                }
-
-            else -> Unit
-        }
+        PlaybackOverlay(
+            state = state,
+            maxRetries = controller.autoRetryLimit,
+            onRetry = { controller.retry() },
+        )
 
         AnimatedVisibility(
             visible = controlsVisible,
@@ -344,9 +277,6 @@ fun VodPlayerScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))))
-                    // Keep the controls clear of the phone/tablet system nav bar (and the side nav
-                    // bar / display cutout in landscape). Zero on a TV, so the 10-foot layout is
-                    // unchanged; the gradient above stays full-bleed to the screen edge.
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
                     )
@@ -383,7 +313,6 @@ fun VodPlayerScreen(
                 Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
                 Spacer(Modifier.height(8.dp))
 
-                // Seek bar with times either side. Left/right on the remote scrubs.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(formatDuration(if (scrubbing) scrubValue.toLong() else positionMs), color = Color.White)
                     Spacer(Modifier.width(12.dp))
