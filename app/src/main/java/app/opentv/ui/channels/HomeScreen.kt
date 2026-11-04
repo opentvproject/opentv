@@ -121,6 +121,7 @@ fun HomeScreen(
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val previewEnabled by settings.guidePreviewVideo.collectAsState()
+    val previewMode by settings.guidePreviewMode.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
 
     val categories by viewModel.visibleCategoryGroups.collectAsState()
@@ -136,12 +137,11 @@ fun HomeScreen(
     // empty. Drives the choice between the loading spinner and a recoverable error below.
     val channelsPresent by viewModel.channelsPresent.collectAsState()
 
-    // Two separate ideas, on purpose:
-    //  - highlightedRow: where the d-pad is in the grid. Moves freely with up/down.
-    //  - selectedRow: what the preview pane plays. Only changes when you press OK, so scrolling
-    //    the list is calm and silent instead of re-tuning a stream on every keypress.
+    // The highlight is where the d-pad is in the grid. The preview stream is selected separately:
+    // by default it remains on the last full-screen channel, with focus-following available as a
+    // setting for viewers who prefer the old browse-to-preview behaviour.
     var highlightedRow by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
-    var selectedRow by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
+    var currentChannelId by remember { mutableLongStateOf(settings.lastChannelId) }
     val previewSound by settings.guidePreviewSound.collectAsState()
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -195,11 +195,9 @@ fun HomeScreen(
         }
     }
 
-    // Keep both valid as the list changes (e.g. switching category): stay on the same channel if
-    // it's still present, otherwise fall back to the top of the new list.
+    // Keep the browsing highlight valid as the list changes (for example, switching category).
     LaunchedEffect(rows) {
         highlightedRow = rows.firstOrNull { it.key == highlightedRow?.key } ?: rows.firstOrNull()
-        selectedRow = rows.firstOrNull { it.key == selectedRow?.key } ?: rows.firstOrNull()
     }
 
     // ---- Live preview player -----------------------------------------------------------------
@@ -238,7 +236,12 @@ fun HomeScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> screenResumed = true
+                Lifecycle.Event.ON_RESUME -> {
+                    // PlayerScreen writes this before playback begins. Re-read it every time the
+                    // guide returns so Back immediately restores that same channel in the preview.
+                    currentChannelId = settings.lastChannelId
+                    screenResumed = true
+                }
                 Lifecycle.Event.ON_PAUSE -> {
                     screenResumed = false
                     previewController.stop()
@@ -262,23 +265,47 @@ fun HomeScreen(
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
-    // Preview audio follows the setting; muted by default so browsing stays quiet.
+    // Preview audio follows the existing sound setting.
     LaunchedEffect(previewSound) {
         previewController.player.volume = if (previewSound) 1f else 0f
     }
 
-    // Tune the preview to the highlighted channel, so it follows the d-pad as you browse — the
-    // standard TV-guide behaviour. Debounced, so holding a direction doesn't re-tune every step.
+    // By default the preview returns to the channel that was playing full-screen and stays there
+    // while focus moves through the guide. The alternate setting follows the highlighted channel;
+    // only that mode is debounced so holding a direction doesn't re-tune every step.
     // While a recording is running the preview is silenced entirely: on a single-connection line a
     // muted preview is still a second stream, which fights the recording and risks a provider ban.
     val recordingActive = activeRecordings.isNotEmpty()
-    LaunchedEffect(highlightedRow?.key, previewEnabled, screenResumed, recordingActive) {
-        val row = highlightedRow
-        if (!previewEnabled || !screenResumed || recordingActive || row == null) {
+    val highlightedChannel = highlightedRow?.primary
+    val previewChannelId = GuidePreviewPolicy.channelId(
+        mode = previewMode,
+        currentChannelId = currentChannelId,
+        highlightedChannelId = highlightedChannel?.id,
+    )
+    val previewVisible = previewEnabled && !recordingActive
+    val watchChannelId = GuidePreviewPolicy.watchChannelId(
+        previewVisible = previewVisible,
+        previewChannelId = previewChannelId,
+        highlightedChannelId = highlightedChannel?.id,
+    )
+    LaunchedEffect(
+        previewChannelId,
+        previewEnabled,
+        screenResumed,
+        recordingActive,
+    ) {
+        if (!previewEnabled || !screenResumed || recordingActive || previewChannelId == null) {
             previewController.stop()
             return@LaunchedEffect
         }
-        val channel = row.primary
+        val channel = if (previewChannelId == highlightedChannel?.id) {
+            highlightedChannel
+        } else {
+            graph.catalogRepository.channel(previewChannelId)
+        } ?: highlightedChannel ?: run {
+            previewController.stop()
+            return@LaunchedEffect
+        }
         val source = graph.sourceRepository.byId(channel.sourceId)
         previewController.play(
             PlayerController.Request(
@@ -287,7 +314,7 @@ fun HomeScreen(
                 userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                 isLive = true,
             ),
-            debounce = true,
+            debounce = previewMode == AppSettings.GuidePreviewMode.HIGHLIGHTED_CHANNEL,
         )
     }
 
@@ -420,10 +447,20 @@ fun HomeScreen(
                 GuidePreview(
                     row = highlightedRow,
                     nowMillis = nowMillis,
-                    onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
+                    onWatch = {
+                        watchChannelId?.let { id ->
+                            if (id == highlightedChannel?.id) {
+                                highlightedChannel?.let(::goFullscreen)
+                            } else {
+                                recordScope.launch {
+                                    graph.catalogRepository.channel(id)?.let(::goFullscreen)
+                                }
+                            }
+                        }
+                    },
                     onRefresh = onRefresh,
                     onAddSource = onAddSource,
-                    previewPlayer = if (previewEnabled && !recordingActive) previewController.player else null,
+                    previewPlayer = if (previewVisible) previewController.player else null,
                     isRecording = highlightedRow?.primary?.id?.let { id ->
                         activeRecordings.any { it.channelId == id }
                     } == true,
