@@ -44,6 +44,12 @@ class AppSettings private constructor(context: Context) {
     private val _channelLayout = MutableStateFlow(readChannelLayout())
     val channelLayout: StateFlow<ChannelLayout> = _channelLayout.asStateFlow()
 
+    /** Which channel the guide's video pane plays while focus moves through the guide. */
+    enum class GuidePreviewMode { CURRENT_CHANNEL, HIGHLIGHTED_CHANNEL }
+
+    private val _guidePreviewMode = MutableStateFlow(readGuidePreviewMode())
+    val guidePreviewMode: StateFlow<GuidePreviewMode> = _guidePreviewMode.asStateFlow()
+
     /** Whether embedded subtitles/closed captions are shown when a stream carries them. */
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
@@ -122,6 +128,11 @@ class AppSettings private constructor(context: Context) {
     fun setChannelLayout(layout: ChannelLayout) {
         prefs.edit().putString(KEY_CHANNEL_LAYOUT, layout.name).apply()
         _channelLayout.value = layout
+    }
+
+    fun setGuidePreviewMode(mode: GuidePreviewMode) {
+        prefs.edit().putString(KEY_PREVIEW_MODE, mode.name).apply()
+        _guidePreviewMode.value = mode
     }
 
     fun setSubtitlesEnabled(enabled: Boolean) {
@@ -268,6 +279,10 @@ class AppSettings private constructor(context: Context) {
     private fun readChannelLayout(): ChannelLayout =
         runCatching { ChannelLayout.valueOf(prefs.getString(KEY_CHANNEL_LAYOUT, null) ?: "") }
             .getOrDefault(ChannelLayout.GRID)
+
+    private fun readGuidePreviewMode(): GuidePreviewMode =
+        runCatching { GuidePreviewMode.valueOf(prefs.getString(KEY_PREVIEW_MODE, null) ?: "") }
+            .getOrDefault(GuidePreviewMode.CURRENT_CHANNEL)
 
     // ---- Recording ---------------------------------------------------------------------------
 
@@ -426,6 +441,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_SUBTITLES = "subtitles_enabled"
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
+        private const val KEY_PREVIEW_MODE = "guide_preview_mode"
         private const val KEY_PIN_HASH = "parental_pin_hash"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
