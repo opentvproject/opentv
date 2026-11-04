@@ -168,20 +168,26 @@ class RecordingService : Service() {
                 Log.w(TAG, "Recording $id failed", t)
             }
         } finally {
-            // The file is now at its final size — anyone watching it should see the true end.
-            RecordingLiveState.markInactive(id)
-            runCatching { sink?.close() }
-            val ok = total > 0 && error == null
-            runCatching {
-                repo.markFinished(
-                    id = id,
-                    ok = ok,
-                    atMillis = System.currentTimeMillis(),
-                    bytes = total,
-                    error = if (ok) null else (error ?: getString(R.string.rec_error_nothing)),
-                )
+            // A user stop cancels this coroutine. Cleanup must outlive that cancellation or Room's
+            // suspended status write is skipped, leaving a phantom RECORDING row after capture ends.
+            RecordingFinalizer.run {
+                // The file is now at its final size — anyone watching it should see the true end.
+                RecordingLiveState.markInactive(id)
+                runCatching { sink?.close() }
+                val ok = total > 0 && error == null
+                runCatching {
+                    repo.markFinished(
+                        id = id,
+                        ok = ok,
+                        atMillis = System.currentTimeMillis(),
+                        bytes = total,
+                        error = if (ok) null else (error ?: getString(R.string.rec_error_nothing)),
+                    )
+                }.onFailure { throwable ->
+                    Log.e(TAG, "Recording $id could not persist final status", throwable)
+                }
+                finish(id)
             }
-            finish(id)
         }
     }
 
