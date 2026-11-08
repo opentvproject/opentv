@@ -230,6 +230,7 @@ fun PlayerScreen(
                     title = channel.shownName,
                     userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                     isLive = true,
+                    channelId = channel.id,
                 ),
                 debounce = false,
             )
