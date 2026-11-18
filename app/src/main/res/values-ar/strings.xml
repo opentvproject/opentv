@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">نسبة العرض إلى الارتفاع</string>
     <string name="player_none_available">لا يوجد متاح</string>
     <string name="player_subtitles_off">إيقاف</string>
+    <string name="player_audio_off">إيقاف</string>
     <string name="settings_providers_title">مزوّدو الخدمة</string>
     <string name="settings_providers_subtitle">إضافة مصادر IPTV وإزالتها وإعادة اختبارها</string>
     <string name="settings_addons_title">الإضافات (Stremio)</string>

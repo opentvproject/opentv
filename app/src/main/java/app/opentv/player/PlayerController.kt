@@ -263,6 +263,9 @@ class PlayerController(
         // Cancelling here is what makes fast channel-changing safe: the previous switch never
         // reaches the player, so we never stack prepares.
         switchJob?.cancel()
+        // Audio "Off" is a per-stream choice: a channel that came up silent with no hint why
+        // would look broken, so tuning to a different stream brings audio back.
+        if (current?.url != request.url && isAudioDisabled) enableAudio()
         current = request
 
         switchJob = scope.launch {
@@ -343,6 +346,28 @@ class PlayerController(
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
     }
+
+    /**
+     * Turn audio off entirely (the "Off" entry in the audio picker). Unlike a mute this drops the
+     * audio renderer, so nothing is decoded; it is undone by picking a track or by [enableAudio].
+     */
+    fun disableAudio() {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            .build()
+    }
+
+    /** Let the selector pick an audio track again. */
+    fun enableAudio() {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .build()
+    }
+
+    val isAudioDisabled: Boolean
+        get() = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)
 
     fun seekBackward() {
         if (player.isCurrentMediaItemSeekable) player.seekBack()

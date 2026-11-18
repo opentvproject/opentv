@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Képarány</string>
     <string name="player_none_available">Nincs elérhető</string>
     <string name="player_subtitles_off">Kikapcsolva</string>
+    <string name="player_audio_off">Kikapcsolva</string>
     <string name="settings_providers_title">Szolgáltatók</string>
     <string name="settings_providers_subtitle">IPTV-forrásainak hozzáadása, eltávolítása és újratesztelése</string>
     <string name="settings_addons_title">Bővítmények (Stremio)</string>

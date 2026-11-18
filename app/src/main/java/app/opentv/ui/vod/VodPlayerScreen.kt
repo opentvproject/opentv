@@ -484,9 +484,11 @@ private fun TrackPanel(
     val groups = tracks.groups.filter { it.type == trackType }
     val options = mutableListOf<Triple<String, Boolean, () -> Unit>>()
 
+    val anySelected = groups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
     if (panel == VodPanel.SUBTITLES) {
-        val anySelected = groups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
         options += Triple(stringResource(R.string.player_subtitles_off), !anySelected) { controller.disableText(); onDone() }
+    } else {
+        options += Triple(stringResource(R.string.player_audio_off), !anySelected) { controller.disableAudio(); onDone() }
     }
     groups.forEach { group ->
         for (i in 0 until group.length) {

@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">نسبت تصویر</string>
     <string name="player_none_available">چیزی موجود نیست</string>
     <string name="player_subtitles_off">خاموش</string>
+    <string name="player_audio_off">خاموش</string>
     <string name="settings_providers_title">ارائه‌دهندگان</string>
     <string name="settings_providers_subtitle">منابع IPTV خود را اضافه، حذف و دوباره آزمایش کنید</string>
     <string name="settings_addons_title">افزونه‌ها (Stremio)</string>

@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Beeldverhouding</string>
     <string name="player_none_available">Geen beschikbaar</string>
     <string name="player_subtitles_off">Uit</string>
+    <string name="player_audio_off">Uit</string>
     <string name="settings_providers_title">Providers</string>
     <string name="settings_providers_subtitle">Voeg je IPTV-bronnen toe, verwijder ze of test ze opnieuw</string>
     <string name="settings_addons_title">Add-ons (Stremio)</string>

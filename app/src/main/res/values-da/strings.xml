@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Billedformat</string>
     <string name="player_none_available">Intet tilgængeligt</string>
     <string name="player_subtitles_off">Fra</string>
+    <string name="player_audio_off">Fra</string>
     <string name="settings_providers_title">Udbydere</string>
     <string name="settings_providers_subtitle">Tilføj, fjern og gentest dine IPTV-kilder</string>
     <string name="settings_addons_title">Tilføjelser (Stremio)</string>

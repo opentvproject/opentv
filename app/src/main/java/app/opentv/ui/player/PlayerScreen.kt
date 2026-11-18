@@ -712,13 +712,14 @@ private fun OptionPanel(
     onDone: () -> Unit,
 ) {
     val offLabel = stringResource(R.string.player_subtitles_off)
+    val audioOffLabel = stringResource(R.string.player_audio_off)
     val standardLabel = stringResource(R.string.player_quality_standard)
     val fitLabel = stringResource(R.string.player_aspect_fit)
     val fillLabel = stringResource(R.string.player_aspect_fill)
     val stretchLabel = stringResource(R.string.player_aspect_stretch)
     val options: List<Option> = when (panel) {
         Panel.SUBTITLES -> buildSubtitleOptions(controller, settings, tracks, offLabel, onDone)
-        Panel.AUDIO -> buildAudioOptions(controller, tracks, onDone)
+        Panel.AUDIO -> buildAudioOptions(controller, tracks, audioOffLabel, onDone)
         Panel.QUALITY -> variants.map { v ->
             Option(v.qualityLabel.ifEmpty { standardLabel }, v.id == currentId) { onTune(v); onDone() }
         }
@@ -808,10 +809,16 @@ private fun buildSubtitleOptions(
 private fun buildAudioOptions(
     controller: PlayerController,
     tracks: Tracks,
+    offLabel: String,
     onDone: () -> Unit,
 ): List<Option> {
     val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+    val anySelected = audioGroups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
     val list = mutableListOf<Option>()
+    list += Option(offLabel, !anySelected) {
+        controller.disableAudio()
+        onDone()
+    }
     audioGroups.forEach { group ->
         for (i in 0 until group.length) {
             if (!group.isTrackSupported(i)) continue

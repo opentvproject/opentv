@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Rasio aspek</string>
     <string name="player_none_available">Tidak ada yang tersedia</string>
     <string name="player_subtitles_off">Nonaktif</string>
+    <string name="player_audio_off">Nonaktif</string>
     <string name="settings_providers_title">Penyedia</string>
     <string name="settings_providers_subtitle">Tambah, hapus, dan uji ulang sumber IPTV Anda</string>
     <string name="settings_addons_title">Add-on (Stremio)</string>

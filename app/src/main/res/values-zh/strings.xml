@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">画面比例</string>
     <string name="player_none_available">无可用项</string>
     <string name="player_subtitles_off">关闭</string>
+    <string name="player_audio_off">关闭</string>
     <string name="settings_providers_title">提供商</string>
     <string name="settings_providers_subtitle">添加、移除并重新测试你的 IPTV 来源</string>
     <string name="settings_addons_title">插件（Stremio）</string>

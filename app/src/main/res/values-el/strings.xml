@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Αναλογία διαστάσεων</string>
     <string name="player_none_available">Καμία διαθέσιμη</string>
     <string name="player_subtitles_off">Απενεργοποιημένοι</string>
+    <string name="player_audio_off">Απενεργοποιημένοι</string>
     <string name="settings_providers_title">Πάροχοι</string>
     <string name="settings_providers_subtitle">Προσθέστε, αφαιρέστε και επανελέγξτε τις πηγές IPTV σας</string>
     <string name="settings_addons_title">Πρόσθετα (Stremio)</string>

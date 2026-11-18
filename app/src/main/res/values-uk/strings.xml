@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Співвідношення сторін</string>
     <string name="player_none_available">Немає доступних</string>
     <string name="player_subtitles_off">Вимкнено</string>
+    <string name="player_audio_off">Вимкнено</string>
     <string name="settings_providers_title">Провайдери</string>
     <string name="settings_providers_subtitle">Додавайте, видаляйте та повторно перевіряйте свої джерела IPTV</string>
     <string name="settings_addons_title">Додатки (Stremio)</string>

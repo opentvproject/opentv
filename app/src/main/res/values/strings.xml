@@ -132,6 +132,7 @@
     <string name="player_aspect_ratio_title">Aspect ratio</string>
     <string name="player_none_available">None available</string>
     <string name="player_subtitles_off">Off</string>
+    <string name="player_audio_off">Off</string>
 
     <!-- ============================ Settings hub ============================ -->
     <string name="settings_providers_title">Providers</string>
