@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Tỷ lệ khung hình</string>
     <string name="player_none_available">Không có sẵn</string>
     <string name="player_subtitles_off">Tắt</string>
+    <string name="player_audio_off">Tắt</string>
     <string name="settings_providers_title">Nhà cung cấp</string>
     <string name="settings_providers_subtitle">Thêm, xóa và kiểm tra lại nguồn IPTV của bạn</string>
     <string name="settings_addons_title">Tiện ích mở rộng (Stremio)</string>

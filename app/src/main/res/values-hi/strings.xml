@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">आकार अनुपात</string>
     <string name="player_none_available">कोई उपलब्ध नहीं</string>
     <string name="player_subtitles_off">बंद</string>
+    <string name="player_audio_off">बंद</string>
     <string name="settings_providers_title">प्रदाता</string>
     <string name="settings_providers_subtitle">अपने IPTV स्रोत जोड़ें, हटाएं और फिर से टेस्ट करें</string>
     <string name="settings_addons_title">ऐड-ऑन (Stremio)</string>

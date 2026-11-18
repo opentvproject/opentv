@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Seitenverhältnis</string>
     <string name="player_none_available">Keine verfügbar</string>
     <string name="player_subtitles_off">Aus</string>
+    <string name="player_audio_off">Aus</string>
     <string name="settings_providers_title">Anbieter</string>
     <string name="settings_providers_subtitle">Füge deine IPTV-Quellen hinzu, entferne oder teste sie erneut</string>
     <string name="settings_addons_title">Add-ons (Stremio)</string>

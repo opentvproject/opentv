@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Bildformat</string>
     <string name="player_none_available">Inget tillgängligt</string>
     <string name="player_subtitles_off">Av</string>
+    <string name="player_audio_off">Av</string>
     <string name="settings_providers_title">Leverantörer</string>
     <string name="settings_providers_subtitle">Lägg till, ta bort och testa om dina IPTV-källor</string>
     <string name="settings_addons_title">Tillägg (Stremio)</string>

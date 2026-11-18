@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Съотношение на страните</string>
     <string name="player_none_available">Няма налични</string>
     <string name="player_subtitles_off">Изключени</string>
+    <string name="player_audio_off">Изключени</string>
     <string name="settings_providers_title">Доставчици</string>
     <string name="settings_providers_subtitle">Добавяйте, премахвайте и тествайте отново вашите IPTV източници</string>
     <string name="settings_addons_title">Добавки (Stremio)</string>

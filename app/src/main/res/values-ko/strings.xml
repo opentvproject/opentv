@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">화면 비율</string>
     <string name="player_none_available">사용 가능한 항목 없음</string>
     <string name="player_subtitles_off">끄기</string>
+    <string name="player_audio_off">끄기</string>
     <string name="settings_providers_title">공급자</string>
     <string name="settings_providers_subtitle">IPTV 소스 추가, 제거 및 재테스트</string>
     <string name="settings_addons_title">애드온(Stremio)</string>

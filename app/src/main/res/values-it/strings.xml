@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Proporzioni</string>
     <string name="player_none_available">Nessuno disponibile</string>
     <string name="player_subtitles_off">Disattivati</string>
+    <string name="player_audio_off">Disattivati</string>
     <string name="settings_providers_title">Provider</string>
     <string name="settings_providers_subtitle">Aggiungi, rimuovi e ritesta le tue sorgenti IPTV</string>
     <string name="settings_addons_title">Add-on (Stremio)</string>

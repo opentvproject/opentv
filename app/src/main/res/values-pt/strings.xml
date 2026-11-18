@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Proporção do ecrã</string>
     <string name="player_none_available">Nenhuma disponível</string>
     <string name="player_subtitles_off">Desligado</string>
+    <string name="player_audio_off">Desligado</string>
     <string name="settings_providers_title">Fornecedores</string>
     <string name="settings_providers_subtitle">Adicione, remova e volte a testar as suas fontes IPTV</string>
     <string name="settings_addons_title">Add-ons (Stremio)</string>

@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Соотношение сторон</string>
     <string name="player_none_available">Недоступно</string>
     <string name="player_subtitles_off">Выкл.</string>
+    <string name="player_audio_off">Выкл.</string>
     <string name="settings_providers_title">Провайдеры</string>
     <string name="settings_providers_subtitle">Добавляйте, удаляйте и проверяйте свои источники IPTV</string>
     <string name="settings_addons_title">Дополнения (Stremio)</string>

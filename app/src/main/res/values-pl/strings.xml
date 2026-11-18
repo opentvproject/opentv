@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Proporcje obrazu</string>
     <string name="player_none_available">Brak dostępnych</string>
     <string name="player_subtitles_off">Wyłączone</string>
+    <string name="player_audio_off">Wyłączone</string>
     <string name="settings_providers_title">Dostawcy</string>
     <string name="settings_providers_subtitle">Dodawaj, usuwaj i testuj ponownie swoje źródła IPTV</string>
     <string name="settings_addons_title">Dodatki (Stremio)</string>

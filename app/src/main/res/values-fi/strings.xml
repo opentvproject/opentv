@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Kuvasuhde</string>
     <string name="player_none_available">Ei saatavilla</string>
     <string name="player_subtitles_off">Pois</string>
+    <string name="player_audio_off">Pois</string>
     <string name="settings_providers_title">Palveluntarjoajat</string>
     <string name="settings_providers_subtitle">Lisää, poista ja testaa IPTV-lähteitäsi uudelleen</string>
     <string name="settings_addons_title">Lisäosat (Stremio)</string>

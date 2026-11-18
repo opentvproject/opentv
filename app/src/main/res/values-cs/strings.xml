@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Poměr stran</string>
     <string name="player_none_available">Nic k dispozici</string>
     <string name="player_subtitles_off">Vypnuto</string>
+    <string name="player_audio_off">Vypnuto</string>
     <string name="settings_providers_title">Poskytovatelé</string>
     <string name="settings_providers_subtitle">Přidávejte, odebírejte a opakovaně testujte své zdroje IPTV</string>
     <string name="settings_addons_title">Doplňky (Stremio)</string>

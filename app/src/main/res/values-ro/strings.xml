@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Raport de aspect</string>
     <string name="player_none_available">Niciuna disponibilă</string>
     <string name="player_subtitles_off">Dezactivate</string>
+    <string name="player_audio_off">Dezactivate</string>
     <string name="settings_providers_title">Furnizori</string>
     <string name="settings_providers_subtitle">Adaugă, elimină și retestează sursele tale IPTV</string>
     <string name="settings_addons_title">Suplimente (Stremio)</string>

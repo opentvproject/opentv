@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">สัดส่วนภาพ</string>
     <string name="player_none_available">ไม่มีตัวเลือก</string>
     <string name="player_subtitles_off">ปิด</string>
+    <string name="player_audio_off">ปิด</string>
     <string name="settings_providers_title">ผู้ให้บริการ</string>
     <string name="settings_providers_subtitle">เพิ่ม ลบ และทดสอบแหล่งที่มา IPTV ของคุณอีกครั้ง</string>
     <string name="settings_addons_title">แอดออน (Stremio)</string>

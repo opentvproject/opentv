@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Format slike</string>
     <string name="player_none_available">Ništa dostupno</string>
     <string name="player_subtitles_off">Isključeno</string>
+    <string name="player_audio_off">Isključeno</string>
     <string name="settings_providers_title">Pružatelji usluga</string>
     <string name="settings_providers_subtitle">Dodajte, uklonite i ponovno testirajte svoje IPTV izvore</string>
     <string name="settings_addons_title">Dodaci (Stremio)</string>

@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">En-boy oranı</string>
     <string name="player_none_available">Kullanılabilir seçenek yok</string>
     <string name="player_subtitles_off">Kapalı</string>
+    <string name="player_audio_off">Kapalı</string>
     <string name="settings_providers_title">Sağlayıcılar</string>
     <string name="settings_providers_subtitle">IPTV kaynaklarınızı ekleyin, kaldırın ve yeniden test edin</string>
     <string name="settings_addons_title">Eklentiler (Stremio)</string>

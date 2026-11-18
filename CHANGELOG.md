@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.11
+
+- **Audio can be turned off.** The in-player **Audio** picker (live and VOD) now has an **Off**
+  entry alongside the stream's audio tracks, for watching with the sound from somewhere else or a
+  stream whose audio track is broken. Off drops the audio renderer entirely rather than muting
+  the volume, and it applies to the current stream only: tuning to another channel brings audio
+  back, so a channel never comes up silent with no hint why. Picking any audio track turns it on
+  again.
+
 ## 0.11.10
 
 - **Fire TV: app row fix, take two.** v0.11.9 replaced the placeholder artwork but the stick still

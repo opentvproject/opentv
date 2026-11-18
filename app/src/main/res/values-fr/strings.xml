@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">Format d\'image</string>
     <string name="player_none_available">Aucun disponible</string>
     <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_audio_off">Désactivés</string>
     <string name="settings_providers_title">Fournisseurs</string>
     <string name="settings_providers_subtitle">Ajoutez, supprimez et retestez vos sources IPTV</string>
     <string name="settings_addons_title">Extensions (Stremio)</string>

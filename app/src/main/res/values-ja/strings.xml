@@ -118,6 +118,7 @@
     <string name="player_aspect_ratio_title">アスペクト比</string>
     <string name="player_none_available">利用可能な項目はありません</string>
     <string name="player_subtitles_off">オフ</string>
+    <string name="player_audio_off">オフ</string>
     <string name="settings_providers_title">プロバイダー</string>
     <string name="settings_providers_subtitle">IPTVソースの追加・削除・再テスト</string>
     <string name="settings_addons_title">アドオン（Stremio）</string>
