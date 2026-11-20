@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This file is part of OpenTV.
+  Copyright (C) 2026 The OpenTV Contributors
+  Licensed under the GNU General Public License v3.0 or later.
+
+  Pre-Android 12 backup rules (android:fullBackupContent).
+
+  OpenTV stores provider credentials (Xtream username/password, Stalker MAC, SMB password)
+  in plaintext, on-device, by design: there is no OpenTV account and no server to hold them.
+  That makes the device's own storage the only correct place for them — and makes Android
+  Auto Backup, which would upload the app's private directory to the user's Google Drive,
+  the one path by which they could leave it.
+
+  Everything is excluded. A restored copy would carry a provider's line to a different
+  device, out of the user's sight. Nothing here is worth that.
+-->
+<full-backup-content>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+    <exclude domain="device_root" path="." />
+    <exclude domain="device_file" path="." />
+    <exclude domain="device_database" path="." />
+    <exclude domain="device_sharedpref" path="." />
+</full-backup-content>

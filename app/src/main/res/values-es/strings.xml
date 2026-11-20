@@ -268,6 +268,10 @@
     <string name="epg_name_optional">Nombre (opcional)</string>
     <string name="epg_xmltv_url">URL de XMLTV (.xml o .xml.gz)</string>
     <string name="epg_add_guide">Agregar guía</string>
+    <string name="epg_suggestion_title">Hay una guía gratuita para tu región</string>
+    <string name="epg_suggestion_body">Tus canales parecen ser de una misma región y hay una guía gratuita que la cubre: %1$s. Activarla la descarga desde un servidor externo, así que solo ocurre si lo dices tú.</string>
+    <string name="epg_suggestion_accept">Activarla</string>
+    <string name="epg_suggestion_dismiss">Ahora no</string>
     <string name="sync_desc">Copia tu contenido en curso entre dos dispositivos OpenTV por tu propia wifi — nada sale de tu casa y no se necesita ninguna cuenta.</string>
     <string name="sync_share_from_here">Compartir desde aquí</string>
     <string name="sync_receive">Recibir</string>

@@ -300,7 +300,10 @@
     <string name="epg_name_optional">Name (optional)</string>
     <string name="epg_xmltv_url">XMLTV URL (.xml or .xml.gz)</string>
     <string name="epg_add_guide">Add guide</string>
-
+    <string name="epg_suggestion_title">A free guide is available for your region</string>
+    <string name="epg_suggestion_body">Your channels look like they are from one region, and a free guide covers it: %1$s. Turning it on downloads it from a third-party server, so it only happens if you say so.</string>
+    <string name="epg_suggestion_accept">Turn it on</string>
+    <string name="epg_suggestion_dismiss">Not now</string>
     <!-- ============================ Sync watch history ============================ -->
     <string name="sync_desc">Copy your continue-watching between two OpenTV devices over your own wifi — nothing leaves the house, and no account is involved.</string>
     <string name="sync_share_from_here">Share from here</string>
