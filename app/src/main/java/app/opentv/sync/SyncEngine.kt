@@ -60,7 +60,8 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             } ?: return@mapNotNull null
             SyncPosition(
                 profile = profileName,
-                streamUrl = streamUrl,
+                // Hashed, never raw: an Xtream URL carries the account's user and password.
+                streamUrl = SyncKeys.key(streamUrl),
                 kind = parts[0],
                 positionMillis = pos.positionMillis,
                 durationMillis = pos.durationMillis,
@@ -79,7 +80,7 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
                     title = r.title,
                     description = r.description,
                     filePath = r.filePath,
-                    streamUrl = r.streamUrl,
+                    streamUrl = SyncKeys.key(r.streamUrl),
                     userAgent = r.userAgent,
                     scheduledStartMillis = r.scheduledStartMillis,
                     scheduledEndMillis = r.scheduledEndMillis,
@@ -92,9 +93,11 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             generatedAtMillis = System.currentTimeMillis(),
             profiles = profiles.map { it.name },
             positions = positions,
-            favouriteChannels = graph.catalogRepository.favouriteChannelUrls(),
-            hiddenChannels = graph.catalogRepository.hiddenChannelUrls(),
-            favouriteMovies = graph.catalogRepository.favouriteMovieUrls(),
+            // Curation is keyed by URL on both sides, so it is keyed by [SyncKeys.key] on the wire
+            // for the same reason as the positions above.
+            favouriteChannels = graph.catalogRepository.favouriteChannelUrls().map(SyncKeys::key),
+            hiddenChannels = graph.catalogRepository.hiddenChannelUrls().map(SyncKeys::key),
+            favouriteMovies = graph.catalogRepository.favouriteMovieUrls().map(SyncKeys::key),
             favouriteSeries = graph.catalogRepository.favouriteSeriesIds(),
             hiddenCategories = graph.settings.hiddenCategories.value.toList(),
             recordings = recordings,
@@ -116,6 +119,10 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             }
         }
 
+        // Every URL-keyed item arrives as a [SyncKeys.key]; the only place a real URL now exists is
+        // this device's own catalogue. Build just the slice of it this bundle references.
+        val urlIndex = buildUrlIndex(bundle)
+
         // Curation — additive union, keyed by stable identifiers. Count only genuinely new keys
         // (ones we hadn't already curated) so the "Synced N" line means "new to this device".
         val localFavChannels = graph.catalogRepository.favouriteChannelUrls().toHashSet()
@@ -125,15 +132,18 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
 
         var favourites = 0
         var hidden = 0
-        for (url in bundle.favouriteChannels) {
+        for (key in bundle.favouriteChannels) {
+            val url = resolveUrl(key, urlIndex, bundle.version) ?: continue
             graph.catalogRepository.markChannelFavouriteByUrl(url)
             if (localFavChannels.add(url)) favourites++
         }
-        for (url in bundle.hiddenChannels) {
+        for (key in bundle.hiddenChannels) {
+            val url = resolveUrl(key, urlIndex, bundle.version) ?: continue
             graph.catalogRepository.markChannelHiddenByUrl(url)
             if (localHiddenChannels.add(url)) hidden++
         }
-        for (url in bundle.favouriteMovies) {
+        for (key in bundle.favouriteMovies) {
+            val url = resolveUrl(key, urlIndex, bundle.version) ?: continue
             graph.catalogRepository.markMovieFavouriteByUrl(url)
             if (localFavMovies.add(url)) favourites++
         }
@@ -153,6 +163,9 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
         for (rec in bundle.recordings) {
             if (!SmbClient.isSmb(rec.filePath)) continue
             if (graph.recordingRepository.byFilePath(rec.filePath) != null) continue
+            // Playback comes from filePath; the stream URL only names the original line, so an
+            // unresolvable key is fine to store empty rather than refusing the whole recording.
+            val recordingStreamUrl = resolveUrl(rec.streamUrl, urlIndex, bundle.version).orEmpty()
             val inserted = runCatching {
                 graph.recordingRepository.insert(
                     Recording(
@@ -164,7 +177,7 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
                         title = rec.title,
                         description = rec.description,
                         filePath = rec.filePath,
-                        streamUrl = rec.streamUrl,
+                        streamUrl = recordingStreamUrl,
                         userAgent = rec.userAgent,
                         scheduledStartMillis = rec.scheduledStartMillis,
                         scheduledEndMillis = rec.scheduledEndMillis,
@@ -182,9 +195,10 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
         var positions = 0
         for (item in bundle.positions) {
             val profileId = profileIdFor(item.profile) ?: continue
+            val url = resolveUrl(item.streamUrl, urlIndex, bundle.version) ?: continue
             val localId = when (item.kind) {
-                "movie" -> graph.catalogRepository.movieByStreamUrl(item.streamUrl)?.id
-                "ep" -> graph.catalogRepository.episodeByStreamUrl(item.streamUrl)?.id
+                "movie" -> graph.catalogRepository.movieByStreamUrl(url)?.id
+                "ep" -> graph.catalogRepository.episodeByStreamUrl(url)?.id
                 else -> null
             } ?: continue
             val mediaKey = "${item.kind}:$localId"
@@ -208,6 +222,54 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             hidden = hidden,
             recordings = recordings,
         )
+    }
+
+    /**
+     * Resolves a bundle key to this device's own URL.
+     *
+     * `null` when a v4 key matches nothing here (the item simply is not in our catalogue). A
+     * pre-v4 bundle carries the URL itself, so that is accepted as-is — an older build on the same
+     * wifi keeps working, and this device is the one that had to change.
+     */
+    private fun resolveUrl(key: String, index: Map<String, String>, bundleVersion: Int): String? {
+        if (key.isEmpty()) return null
+        index[key]?.let { return it }
+        return if (bundleVersion < 4 && key.startsWith("http", ignoreCase = true)) key else null
+    }
+
+    /**
+     * `SyncKeys.key(url) -> url` for the catalogue slices this bundle actually references.
+     *
+     * Built per sync rather than stored: a hash column would need a schema migration for data
+     * that only ever exists for the duration of one merge. Cost is one indexed pass over the
+     * affected tables, and only the tables the peer mentioned.
+     */
+    private suspend fun buildUrlIndex(bundle: SyncBundle): Map<String, String> {
+        val needChannels = bundle.favouriteChannels.isNotEmpty() ||
+            bundle.hiddenChannels.isNotEmpty() ||
+            bundle.recordings.isNotEmpty()
+        val needMovies = bundle.favouriteMovies.isNotEmpty() ||
+            bundle.positions.any { it.kind == "movie" }
+        val needEpisodes = bundle.positions.any { it.kind == "ep" }
+        if (!needChannels && !needMovies && !needEpisodes) return emptyMap()
+
+        val index = HashMap<String, String>()
+        if (needChannels) {
+            for (c in graph.database.channels().allForMatching()) {
+                index[SyncKeys.key(c.streamUrl)] = c.streamUrl
+            }
+        }
+        if (needMovies) {
+            for (m in graph.database.movies().all()) {
+                index[SyncKeys.key(m.streamUrl)] = m.streamUrl
+            }
+        }
+        if (needEpisodes) {
+            for (e in graph.database.episodes().all()) {
+                index[SyncKeys.key(e.streamUrl)] = e.streamUrl
+            }
+        }
+        return index
     }
 
     private suspend fun profileIdFor(name: String): Long? {
