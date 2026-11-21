@@ -3,6 +3,8 @@
  * Copyright (C) 2026 The OpenTV Contributors
  * Licensed under the GNU General Public License v3.0 or later.
  */
+@file:kotlin.OptIn(ExperimentalTextApi::class)
+
 package app.opentv.ui.player
 
 import android.view.ViewGroup
@@ -19,6 +21,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,7 +56,9 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -84,10 +89,15 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
@@ -265,6 +275,18 @@ fun PlayerScreen(
                 RecordingBackgroundPrompt.markShown()
                 showBackgroundPrompt = true
             }
+        }
+        interaction++
+    }
+
+    fun toggleFavourite() {
+        val target = !(variants.firstOrNull { it.id == currentId }?.favourite ?: false)
+        scope.launch {
+            // Same rule as the guide's star: favourite the whole logical channel, so the choice
+            // survives switching quality variants from the player's Quality panel.
+            val ids = variants.map { it.id }.ifEmpty { listOfNotNull(currentId) }
+            ids.forEach { graph.catalogRepository.setChannelFavourite(it, target) }
+            variants = variants.map { it.copy(favourite = target) }
         }
         interaction++
     }
@@ -522,61 +544,98 @@ fun PlayerScreen(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // One row, never wrapped. Every chip is measured at its natural size, then the whole
+                // row is scaled down by a single factor to fit the available width (see barScale).
+                // No per-label font switching: all icons, text and gaps shrink together, and the
+                // factor is computed from the longest label each chip can show so toggling a state
+                // (e.g. Favourite -> Remove favourite) never resizes the bar.
+                val labelStyle = MaterialTheme.typography.labelLarge
+                val chips = buildList {
                     if (controller.isSeekable) {
-                        BarChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind), false) {
+                        add(ChipSpec(Icons.Filled.FastRewind, stringResource(R.string.player_rewind), false) {
                             controller.seekBackward(); interaction++
-                        }
-                        Spacer(Modifier.width(10.dp))
+                        })
                     }
-                    BarChip(
-                        icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                        label = if (paused) stringResource(R.string.common_play) else stringResource(R.string.player_pause),
-                        selected = false,
-                        focusRequester = barFocus,
-                    ) {
-                        paused = !paused
-                        controller.player.playWhenReady = !paused
-                        interaction++
-                    }
+                    add(
+                        ChipSpec(
+                            icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                            label = if (paused) stringResource(R.string.common_play) else stringResource(R.string.player_pause),
+                            selected = false,
+                            focus = true,
+                        ) {
+                            paused = !paused
+                            controller.player.playWhenReady = !paused
+                            interaction++
+                        },
+                    )
                     if (controller.isSeekable) {
-                        Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.FastForward, stringResource(R.string.player_forward), false) {
+                        add(ChipSpec(Icons.Filled.FastForward, stringResource(R.string.player_forward), false) {
                             controller.seekForward(); interaction++
-                        }
+                        })
                     }
 
-                    Spacer(Modifier.width(20.dp))
-                    BarChip(Icons.Filled.Subtitles, stringResource(R.string.player_subtitles), panel == Panel.SUBTITLES) {
+                    val favourite = variants.firstOrNull { it.id == currentId }?.favourite ?: false
+                    add(
+                        ChipSpec(
+                            icon = if (favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                            label = stringResource(
+                                if (favourite) R.string.common_remove_favourite else R.string.common_favourite,
+                            ),
+                            // Measure against the longer of the two labels so the bar doesn't resize.
+                            measureLabel = stringResource(R.string.common_remove_favourite),
+                            selected = favourite,
+                            tint = if (favourite) Color(0xFFFFC107) else null,
+                        ) { toggleFavourite() },
+                    )
+
+                    add(ChipSpec(Icons.Filled.Subtitles, stringResource(R.string.player_subtitles), panel == Panel.SUBTITLES) {
                         panel = if (panel == Panel.SUBTITLES) Panel.NONE else Panel.SUBTITLES; interaction++
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    BarChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio), panel == Panel.AUDIO) {
+                    })
+                    add(ChipSpec(Icons.Filled.Audiotrack, stringResource(R.string.player_audio), panel == Panel.AUDIO) {
                         panel = if (panel == Panel.AUDIO) Panel.NONE else Panel.AUDIO; interaction++
-                    }
+                    })
                     if (variants.size > 1) {
-                        Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.HighQuality, stringResource(R.string.player_quality), panel == Panel.QUALITY) {
+                        add(ChipSpec(Icons.Filled.HighQuality, stringResource(R.string.player_quality), panel == Panel.QUALITY) {
                             panel = if (panel == Panel.QUALITY) Panel.NONE else Panel.QUALITY; interaction++
-                        }
+                        })
                     }
-                    Spacer(Modifier.width(10.dp))
-                    BarChip(Icons.Filled.AspectRatio, stringResource(R.string.player_aspect), panel == Panel.ASPECT) {
+                    add(ChipSpec(Icons.Filled.AspectRatio, stringResource(R.string.player_aspect), panel == Panel.ASPECT) {
                         panel = if (panel == Panel.ASPECT) Panel.NONE else Panel.ASPECT; interaction++
-                    }
-                    Spacer(Modifier.width(10.dp))
+                    })
                     val recordingThis = activeRecordings.any { it.channelId == currentId }
-                    BarChip(
-                        icon = Icons.Filled.FiberManualRecord,
-                        label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
-                        selected = recordingThis,
-                        iconTint = Color(0xFFE53935),
-                    ) { toggleRecord() }
+                    add(
+                        ChipSpec(
+                            icon = Icons.Filled.FiberManualRecord,
+                            label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
+                            measureLabel = stringResource(R.string.player_record),
+                            selected = recordingThis,
+                            tint = Color(0xFFE53935),
+                        ) { toggleRecord() },
+                    )
                     if (pipSupported) {
-                        Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.PictureInPictureAlt, stringResource(R.string.player_pop_out), false) {
+                        add(ChipSpec(Icons.Filled.PictureInPictureAlt, stringResource(R.string.player_pop_out), false) {
                             (context.findActivity() as? app.opentv.MainActivity)?.enterPipNow()
                             interaction++
+                        })
+                    }
+                }
+
+                BoxWithConstraints {
+                    val scale = barScale(chips.map { it.measureLabel }, maxWidth, labelStyle)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(BAR_GAP_BETWEEN * scale),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        chips.forEach { spec ->
+                            BarChip(
+                                icon = spec.icon,
+                                label = spec.label,
+                                selected = spec.selected,
+                                focusRequester = if (spec.focus) barFocus else null,
+                                iconTint = spec.tint,
+                                scale = scale,
+                                onClick = spec.onClick,
+                            )
                         }
                     }
                 }
@@ -861,6 +920,37 @@ private fun OptionRow(
     }
 }
 
+/** One control-bar button. [measureLabel] is the longest text this button may ever show. */
+private data class ChipSpec(
+    val icon: ImageVector,
+    val label: String,
+    val selected: Boolean,
+    val measureLabel: String = label,
+    val tint: Color? = null,
+    val focus: Boolean = false,
+    val onClick: () -> Unit,
+)
+
+/**
+ * Uniform scale for the whole control bar: text widths are measured at the base style, fixed
+ * overhead (icon, padding, icon/text gap, gap between buttons) is added, and the resulting natural
+ * width is compared with what's available. Every button then uses the same factor, so nothing is
+ * clipped and no single label gets a special font size. Measuring the longest possible label keeps
+ * the factor stable across state changes (favourite, record).
+ */
+@Composable
+private fun barScale(labels: List<String>, maxWidth: Dp, style: TextStyle): Float {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    return remember(labels, maxWidth, style, density) {
+        val textPx = labels.sumOf { measurer.measure(it, style).size.width }.toFloat()
+        val perChipPx = with(density) { (BAR_PAD_HORIZONTAL * 2f + BAR_ICON + BAR_ICON_GAP).toPx() }
+        val gapsPx = with(density) { (BAR_GAP_BETWEEN * (labels.size - 1).coerceAtLeast(0).toFloat()).toPx() }
+        val naturalPx = textPx + labels.size.toFloat() * perChipPx + gapsPx
+        if (naturalPx <= 0f) 1f else (with(density) { maxWidth.toPx() } / naturalPx).coerceIn(0.5f, 1f)
+    }
+}
+
 @Composable
 private fun BarChip(
     icon: ImageVector,
@@ -868,6 +958,7 @@ private fun BarChip(
     selected: Boolean,
     focusRequester: FocusRequester? = null,
     iconTint: Color? = null,
+    scale: Float = 1f,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -877,6 +968,7 @@ private fun BarChip(
         else -> Color.White.copy(alpha = 0.14f)
     }
     val content = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
+    val style = MaterialTheme.typography.labelLarge.copy(fontSize = MaterialTheme.typography.labelLarge.fontSize * scale)
 
     Row(
         modifier = Modifier
@@ -885,18 +977,24 @@ private fun BarChip(
             .clip(RoundedCornerShape(12.dp))
             .background(container)
             .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                if (focused) Modifier.border(2.dp * scale, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
                 else Modifier,
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = BAR_PAD_HORIZONTAL * scale, vertical = BAR_PAD_VERTICAL * scale),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = if (focused) content else (iconTint ?: content))
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = content)
+        Icon(icon, contentDescription = label, modifier = Modifier.size(BAR_ICON * scale), tint = if (focused) content else (iconTint ?: content))
+        Spacer(Modifier.width(BAR_ICON_GAP * scale))
+        Text(label, style = style, color = content, maxLines = 1, softWrap = false)
     }
 }
+
+private val BAR_ICON = 18.dp
+private val BAR_PAD_HORIZONTAL = 14.dp
+private val BAR_PAD_VERTICAL = 10.dp
+private val BAR_ICON_GAP = 6.dp
+private val BAR_GAP_BETWEEN = 10.dp
 
 private const val CONTROLS_TIMEOUT_MILLIS = 5_000L
 private const val NUMBER_ENTRY_TIMEOUT_MILLIS = 2_000L
