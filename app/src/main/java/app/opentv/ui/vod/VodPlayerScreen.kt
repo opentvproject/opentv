@@ -5,8 +5,15 @@
  */
 package app.opentv.ui.vod
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -52,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -84,6 +92,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
@@ -115,6 +124,7 @@ fun VodPlayerScreen(
     streamUrl: String,
     title: String,
     userAgent: String,
+    onPlayNext: (mediaKey: String, streamUrl: String, title: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -162,13 +172,73 @@ fun VodPlayerScreen(
     var durationMs by remember { mutableLongStateOf(0L) }
     var scrubbing by remember { mutableStateOf(false) }
     var scrubValue by remember { mutableFloatStateOf(0f) }
+    var nextEpisode by remember(mediaKey) { mutableStateOf<app.opentv.data.model.Episode?>(null) }
+    var nextEpisodeDismissed by remember(mediaKey) { mutableStateOf(false) }
 
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val barFocus = remember { FocusRequester() }
     val rootFocus = remember { FocusRequester() }
+    val seekBarFocus = remember { FocusRequester() }
 
     fun reveal() { controlsVisible = true; interaction++ }
+
+    LaunchedEffect(mediaKey) {
+        val episodeId = mediaKey.removePrefix("ep:").takeIf { it != mediaKey }?.toLongOrNull()
+        nextEpisode = episodeId?.let { graph.catalogRepository.nextEpisode(it) }
+    }
+
+    fun playNextEpisode() {
+        val next = nextEpisode ?: return
+        val nextTitle = next.title.ifBlank { "S${next.season} E${next.episodeNumber}" }
+        onPlayNext("ep:${next.id}", next.streamUrl, nextTitle)
+    }
+
+    val nextEpisodeRemainingMs = (durationMs - positionMs).coerceAtLeast(0L)
+    val showNextEpisodePrompt = nextEpisode != null && !nextEpisodeDismissed &&
+        durationMs > 0L && nextEpisodeRemainingMs <= 60_000L
+
+    LaunchedEffect(nextEpisode?.id, nextEpisodeDismissed, durationMs, positionMs, paused) {
+        if (nextEpisode != null && !nextEpisodeDismissed && !paused && durationMs > 0L &&
+            nextEpisodeRemainingMs == 0L
+        ) {
+            playNextEpisode()
+        }
+    }
+
+    LaunchedEffect(showNextEpisodePrompt) {
+        if (showNextEpisodePrompt) reveal()
+    }
+
+    fun seekFromTimeline(deltaMs: Long) {
+        val ceiling = durationMs
+        if (ceiling <= 0L) return
+        val target = (controller.player.currentPosition + deltaMs).coerceIn(0L, ceiling)
+        controller.player.seekTo(target)
+        positionMs = target
+        scrubValue = target.toFloat()
+        scrubbing = false
+        interaction++
+    }
+
+    val subtitlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            val name = subtitleDisplayName(context, uri)
+            val mimeType = subtitleMimeType(context, uri, name)
+            if (mimeType == null) {
+                Toast.makeText(context, R.string.player_external_subtitle_unsupported, Toast.LENGTH_LONG).show()
+            } else {
+                controller.setExternalSubtitle(uri, mimeType, name?.substringBeforeLast('.'))
+                reveal()
+            }
+        }
+    }
 
     suspend fun savePosition() {
         val player = controller.player
@@ -273,10 +343,12 @@ fun VodPlayerScreen(
     // Auto-hide when playing and not paused/scrubbing and no picker open. A growing recording dips in
     // and out of Buffering as it rides the write head, so for that case Buffering counts as "playing"
     // here — otherwise a single hiccup would pin the transport bar on screen for the rest of the watch.
-    LaunchedEffect(controlsVisible, interaction, state, paused, scrubbing, vodPanel) {
+    LaunchedEffect(controlsVisible, interaction, state, paused, scrubbing, vodPanel, showNextEpisodePrompt) {
         val activelyPlaying = state is PlayerController.State.Playing ||
             (growingRec && state is PlayerController.State.Buffering)
-        if (controlsVisible && !paused && !scrubbing && vodPanel == VodPanel.NONE && activelyPlaying) {
+        if (controlsVisible && !showNextEpisodePrompt && !paused && !scrubbing &&
+            vodPanel == VodPanel.NONE && activelyPlaying
+        ) {
             delay(5_000)
             controlsVisible = false
         }
@@ -391,6 +463,20 @@ fun VodPlayerScreen(
                         controller = controller,
                         tracks = tracks,
                         firstFocus = panelFocus,
+                        onAddExternalSubtitle = {
+                            vodPanel = VodPanel.NONE
+                            try {
+                                subtitlePicker.launch(
+                                    arrayOf("text/*", "application/x-subrip", "application/ttml+xml", "application/octet-stream"),
+                                )
+                            } catch (_: ActivityNotFoundException) {
+                                Toast.makeText(
+                                    context,
+                                    R.string.player_external_subtitle_picker_unavailable,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
                         onDone = { vodPanel = VodPanel.NONE; interaction++ },
                     )
                     Spacer(Modifier.height(16.dp))
@@ -430,7 +516,17 @@ fun VodPlayerScreen(
                             scrubbing = false
                             interaction++
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(seekBarFocus)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (event.key) {
+                                    Key.DirectionLeft -> { seekFromTimeline(-10_000L); true }
+                                    Key.DirectionRight -> { seekFromTimeline(10_000L); true }
+                                    else -> false
+                                }
+                            },
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(formatDuration(durationMs), color = Color.White)
@@ -465,6 +561,22 @@ fun VodPlayerScreen(
                     VodChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio)) {
                         vodPanel = if (vodPanel == VodPanel.AUDIO) VodPanel.NONE else VodPanel.AUDIO
                         interaction++
+                    }
+                    if (showNextEpisodePrompt) {
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            stringResource(R.string.player_next_episode_in, formatDuration(nextEpisodeRemainingMs)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.75f),
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = ::playNextEpisode) {
+                            Text(stringResource(R.string.player_play_next))
+                        }
+                        TextButton(onClick = { nextEpisodeDismissed = true }) {
+                            Text(stringResource(R.string.player_dismiss_next))
+                        }
                     }
                 }
             }
@@ -594,6 +706,7 @@ private fun TrackPanel(
     controller: PlayerController,
     tracks: Tracks,
     firstFocus: FocusRequester,
+    onAddExternalSubtitle: () -> Unit,
     onDone: () -> Unit,
 ) {
     val trackType = if (panel == VodPanel.SUBTITLES) C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
@@ -603,6 +716,7 @@ private fun TrackPanel(
     if (panel == VodPanel.SUBTITLES) {
         val anySelected = groups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
         options += Triple(stringResource(R.string.player_subtitles_off), !anySelected) { controller.disableText(); onDone() }
+        options += Triple(stringResource(R.string.player_add_external_subtitle), false, onAddExternalSubtitle)
     }
     groups.forEach { group ->
         for (i in 0 until group.length) {
@@ -635,6 +749,25 @@ private fun TrackPanel(
                 TrackRow(label, selected, onClick, if (index == 0) firstFocus else null)
             }
         }
+    }
+}
+
+private fun subtitleDisplayName(context: Context, uri: Uri): String? =
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+
+private fun subtitleMimeType(context: Context, uri: Uri, displayName: String?): String? {
+    val name = displayName.orEmpty().lowercase(java.util.Locale.ROOT)
+    val providerType = context.contentResolver.getType(uri)?.substringBefore(';')?.lowercase(java.util.Locale.ROOT)
+    return when {
+        name.endsWith(".srt") || providerType in setOf("application/x-subrip", "application/subrip") ->
+            MimeTypes.APPLICATION_SUBRIP
+        name.endsWith(".vtt") || providerType == MimeTypes.TEXT_VTT -> MimeTypes.TEXT_VTT
+        name.endsWith(".ass") || name.endsWith(".ssa") || providerType == MimeTypes.TEXT_SSA -> MimeTypes.TEXT_SSA
+        name.endsWith(".ttml") || name.endsWith(".xml") || providerType == MimeTypes.APPLICATION_TTML ->
+            MimeTypes.APPLICATION_TTML
+        else -> null
     }
 }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Organise whole categories.** Hide and reorder Live TV, Movies and Shows categories from Display settings. Movies and Shows now use a left-side category rail with provider filtering.
+- **My Views.** Continue watching and watched Movies/Shows are grouped by active profile. Titles over 95% complete count as watched; individual entries or the full history can be cleared.
+- **More playback control.** Movie and episode playback accepts external SRT, VTT, SSA/ASS and TTML subtitles, supports scrubbing and remote timeline seeking, and offers the next episode during the final minute with automatic continuation unless dismissed.
+- **Personalise Display.** Choose a language from a dropdown, scale the UI, and select Forest Green, Warm Amber or Soft Rose accent themes with light and dark variants.
+- **Lower memory pressure.** The guide preview player is created only when enabled; large guide/VOD state caches expire after leaving their screens; Movies and Shows home feeds scan sequentially and category grids load only when selected.
+
 ## 0.12.0
 
 - **Playback diagnostics: find out why it buffers, and get moved to a stream that doesn't.**

@@ -141,6 +141,30 @@ it demonstrably works on the second attempt.
 plus up to three silent restarts. `401`, `404` and `410` are **not** retried — those will not
 fix themselves.
 
+## Memory ownership
+
+The app is intended to run on low-memory TV devices, so large working sets have explicit owners
+and release points:
+
+- Coil uses a bounded memory cache and disk cache. Opaque artwork may decode as RGB_565; images
+  with transparency retain their alpha channel.
+- Full-screen players are screen-scoped. Their `PlayerController` and coroutine scope are
+  released when the player screen leaves composition. Default playback buffers are bounded; DVR
+  and guide preview use their own limits.
+- The guide preview player is only constructed while preview is enabled. Disabling preview stops
+  and releases it rather than keeping an idle decoder alive.
+- Large guide/VOD state flows keep their current value while the screen is active, then clear the
+  replay value after the five-second navigation grace period. Returning to a screen re-queries
+  Room rather than keeping its previous full entity list indefinitely.
+- Movies and Shows home-feed catalogues are loaded sequentially. A category grid queries only its
+  selected category; it does not subscribe to the entire catalogue while home shelves are shown.
+
+The EPG index is intentionally a time-window working set, currently 12 hours across enabled
+feeds. My Views currently materializes all playback positions for the active profile and resolves
+catalogue rows while building its list; a very long history can therefore grow in memory and add
+database lookups. Pagination with a joined query is the next step if measured histories become
+large. Avoid adding arbitrary retention limits that silently discard a user's history.
+
 ### Errors say what to do
 
 `PlaybackErrors` turns exceptions into sentences. `ERROR_CODE_IO_BAD_HTTP_STATUS` tells a user

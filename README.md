@@ -39,12 +39,13 @@ keep it alive. That is the entire point.
 - **Recording (DVR)** — record to the box, a USB drive or your NAS (SMB); schedule from the
   guide; series-link a whole show; play back in-app with full seeking
 - **Catch-up / archive** where your provider offers it, plus **programme reminders**
-- **Movies and series** with resume and per-profile watch history
+- **Movies and series** with resume, per-profile My Views history, external subtitles and next-episode playback
+- **Category controls** — hide or reorder Live TV, Movies and Shows categories in settings
 - **Favourites, categories, hide channels, search**, picture-in-picture, aspect control, and
   hand-off to an external player
 - **Free sync between your own devices** — favourites, watch history and NAS recordings, over
   your wifi or Tailscale, with no server of ours
-- **Multiple languages** (fully translated to Spanish), a parental PIN, profiles, and self-updates
+- **Display choices** — language dropdown, three UI sizes, four accent palettes, a parental PIN, profiles, and self-updates
 - **D-pad first** — designed for a remote, works with a touchscreen
 - **One APK** for Android TV, Fire TV, phones and tablets
 

@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,7 +49,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -67,6 +70,7 @@ import app.opentv.ui.onboarding.AddSourceScreen
 import app.opentv.ui.player.PlayerScreen
 import app.opentv.ui.settings.AboutScreen
 import app.opentv.ui.settings.AppSettingsScreen
+import app.opentv.ui.settings.CategorySettingsScreen
 import app.opentv.ui.settings.DiagnosticsScreen
 import app.opentv.ui.settings.EpgSettingsScreen
 import app.opentv.ui.settings.ParentalControlsScreen
@@ -101,18 +105,28 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings = remember { ServiceLocator.get(this).settings }
             val themeMode by settings.themeMode.collectAsState()
+            val colorTheme by settings.colorTheme.collectAsState()
+            val uiScale by settings.uiScale.collectAsState()
+            val baseDensity = LocalDensity.current
             val darkTheme = when (themeMode) {
                 AppSettings.ThemeMode.DARK -> true
                 AppSettings.ThemeMode.LIGHT -> false
                 // A living-room screen defaults to dark; a phone/tablet follows the system.
                 AppSettings.ThemeMode.SYSTEM -> isTelevision || isSystemInDarkTheme()
             }
-            OpenTvTheme(darkTheme = darkTheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+            OpenTvTheme(darkTheme = darkTheme, colorTheme = colorTheme) {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(
+                        density = baseDensity.density * uiScale.factor,
+                        fontScale = baseDensity.fontScale * uiScale.factor,
+                    ),
                 ) {
-                    OpenTvApp(isTelevision = isTelevision)
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        OpenTvApp(isTelevision = isTelevision)
+                    }
                 }
             }
         }
@@ -194,6 +208,7 @@ object Routes {
     const val PROVIDERS = "providers"
     const val ADDONS = "addons"
     const val CHANNELS = "channels"
+    const val CATEGORIES = "categories"
     const val WEB_MANAGER = "web-manager"
     const val PROFILES = "profiles"
     const val PARENTAL = "parental"
@@ -417,6 +432,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     onOpenAddons = { navController.navigate(Routes.ADDONS) },
                     onOpenGuide = { navController.navigate(Routes.EPG_SETTINGS) },
                     onOpenChannels = { navController.navigate(Routes.CHANNELS) },
+                    onOpenCategories = { navController.navigate(Routes.CATEGORIES) },
                     onOpenWebManager = { navController.navigate(Routes.WEB_MANAGER) },
                     onOpenDisplay = { navController.navigate(Routes.APP_SETTINGS) },
                     onOpenParental = { navController.navigate(Routes.PARENTAL) },
@@ -438,6 +454,10 @@ private fun OpenTvApp(isTelevision: Boolean) {
 
             composable(Routes.CHANNELS) {
                 ChannelManagerScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Routes.CATEGORIES) {
+                CategorySettingsScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.WEB_MANAGER) {
@@ -480,7 +500,10 @@ private fun OpenTvApp(isTelevision: Boolean) {
             }
 
             composable(Routes.APP_SETTINGS) {
-                AppSettingsScreen(onBack = { navController.popBackStack() })
+                AppSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenCategories = { navController.navigate(Routes.CATEGORIES) },
+                )
             }
 
             composable(Routes.PLAYER) { entry ->
@@ -552,6 +575,14 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     streamUrl = arg("url"),
                     title = arg("title"),
                     userAgent = arg("ua").ifEmpty { "OpenTV/0.1 (Android)" },
+                    onPlayNext = { key, url, nextTitle ->
+                        navController.navigate(
+                            Routes.vodPlayer(key, url, nextTitle, arg("ua").ifEmpty { "OpenTV/0.1 (Android)" }),
+                        ) {
+                            popUpTo(Routes.VOD_PLAYER) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
                     onBack = { navController.popBackStack() },
                 )
             }

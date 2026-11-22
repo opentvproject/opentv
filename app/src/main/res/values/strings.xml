@@ -52,12 +52,24 @@
     <string name="common_try_again">Try again</string>
 
     <!-- ============================ Navigation rail ============================ -->
+    <string name="nav_my_view">My Views</string>
     <string name="nav_live_tv">Live TV</string>
     <string name="nav_movies">Movies</string>
     <string name="nav_shows">Shows</string>
     <string name="nav_recordings">Recordings</string>
     <string name="nav_search">Search</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- ============================ My View / playback history ============================ -->
+    <string name="my_view_continue_watching">Continue Watching</string>
+    <string name="my_view_watched">Watched</string>
+    <string name="my_view_movies">Movies</string>
+    <string name="my_view_shows">Shows</string>
+    <string name="my_view_empty">Your playback history will appear here.</string>
+    <string name="my_view_clear_item">Remove %1$s from My Views</string>
+    <string name="my_view_clear_all_title">Clear My Views?</string>
+    <string name="my_view_clear_all_message">This removes all Movies and Shows from your playback history for this profile.</string>
+    <string name="my_view_clear_all_confirm">Clear all</string>
 
     <!-- ============================ Live TV guide / home ============================ -->
     <string name="guide_search_channels">🔍  Search channels</string>
@@ -162,6 +174,13 @@
     <string name="player_aspect_ratio_title">Aspect ratio</string>
     <string name="player_none_available">None available</string>
     <string name="player_subtitles_off">Off</string>
+    <string name="player_add_external_subtitle">Load external subtitle</string>
+    <string name="player_external_subtitle_unsupported">Choose an SRT, VTT, SSA, ASS, or TTML subtitle file.</string>
+    <string name="player_external_subtitle_picker_unavailable">No file picker is installed on this device.</string>
+    <string name="player_next_episode">Next episode</string>
+    <string name="player_next_episode_in">Playing automatically in %1$s</string>
+    <string name="player_play_next">Play next</string>
+    <string name="player_dismiss_next">Dismiss</string>
 
     <!-- ============================ Settings hub ============================ -->
     <string name="settings_providers_title">Providers</string>
@@ -179,6 +198,17 @@
     <string name="settings_guide_title">TV guide</string>
     <string name="settings_guide_subtitle">Guide sources and free XMLTV feeds</string>
     <string name="settings_channels_subtitle">Hide or favourite individual channels</string>
+    <string name="settings_categories_title">Categories</string>
+    <string name="settings_categories_subtitle">Hide or reorder TV channels, shows and VOD categories</string>
+    <string name="settings_manage_categories_button">Manage categories (reorder or hide)</string>
+    <string name="categories_count_summary">%1$d categories (%2$d hidden)</string>
+    <string name="categories_show_all">Show all</string>
+    <string name="categories_hide_all">Hide all</string>
+    <string name="categories_reset_order">Reset order</string>
+    <string name="categories_move_up">Move up</string>
+    <string name="categories_move_down">Move down</string>
+    <string name="categories_hidden_badge">Hidden</string>
+    <string name="categories_empty">No categories found for this section. Add or refresh a provider first.</string>
     <string name="settings_webmanager_title">Manage on phone or laptop</string>
     <string name="settings_webmanager_subtitle">Organise channels in a browser, with a keyboard and mouse</string>
     <string name="settings_display_title">Display &amp; playback</string>
@@ -198,6 +228,16 @@
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_note">TV boxes stay dark on \"Follow system\". Pick Dark or Light to force it.</string>
+    <string name="settings_color_theme_title">Color theme</string>
+    <string name="settings_color_theme_blue">Classic blue</string>
+    <string name="settings_color_theme_forest">Forest green</string>
+    <string name="settings_color_theme_amber">Warm amber</string>
+    <string name="settings_color_theme_rose">Soft rose</string>
+    <string name="settings_ui_size_title">Interface size</string>
+    <string name="settings_ui_size_small">Small</string>
+    <string name="settings_ui_size_recommended">Recommended</string>
+    <string name="settings_ui_size_large">Large</string>
+    <string name="settings_ui_size_note">Scales text and interface elements throughout the app.</string>
     <string name="settings_section_content">Content</string>
     <string name="settings_content_note">Turn off what you don\'t use to sync faster. Turn back on anytime.</string>
     <string name="settings_content_live_subtitle">Channels and the TV guide.</string>

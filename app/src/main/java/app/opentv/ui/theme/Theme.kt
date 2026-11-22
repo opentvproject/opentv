@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import app.opentv.core.AppSettings
 
 /**
  * A deliberately dark, low-chroma palette.
@@ -61,6 +62,54 @@ private val LightScheme = lightColorScheme(
     outline = Color(0xFFD3D7E2),
 )
 
+private val ForestDarkScheme = DarkScheme.copy(
+    primary = Color(0xFF9AC7A8),
+    onPrimary = Color(0xFF1C3828),
+    primaryContainer = Color(0xFF355A41),
+    onPrimaryContainer = Color(0xFFDAF0DF),
+    secondary = Color(0xFFBAD6C0),
+)
+
+private val ForestLightScheme = LightScheme.copy(
+    primary = Color(0xFF386847),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD8EADD),
+    onPrimaryContainer = Color(0xFF102E1B),
+    secondary = Color(0xFF526C59),
+)
+
+private val AmberDarkScheme = DarkScheme.copy(
+    primary = Color(0xFFE4C37C),
+    onPrimary = Color(0xFF3E2B05),
+    primaryContainer = Color(0xFF674D1E),
+    onPrimaryContainer = Color(0xFFF6E6BC),
+    secondary = Color(0xFFDCC68E),
+)
+
+private val AmberLightScheme = LightScheme.copy(
+    primary = Color(0xFF79580B),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFF0E3C0),
+    onPrimaryContainer = Color(0xFF372600),
+    secondary = Color(0xFF715F3B),
+)
+
+private val RoseDarkScheme = DarkScheme.copy(
+    primary = Color(0xFFE8ADB1),
+    onPrimary = Color(0xFF4B252A),
+    primaryContainer = Color(0xFF653940),
+    onPrimaryContainer = Color(0xFFF5DDE0),
+    secondary = Color(0xFFDFB9BC),
+)
+
+private val RoseLightScheme = LightScheme.copy(
+    primary = Color(0xFF8A4350),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFF4DDE0),
+    onPrimaryContainer = Color(0xFF38131C),
+    secondary = Color(0xFF72545A),
+)
+
 /** Scaled up from the Material defaults: ten-foot viewing needs bigger text than a phone. */
 private val OpenTvTypography = Typography(
     displaySmall = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.SemiBold),
@@ -76,10 +125,16 @@ private val OpenTvTypography = Typography(
 @Composable
 fun OpenTvTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    colorTheme: AppSettings.ColorTheme = AppSettings.ColorTheme.BLUE,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkScheme else LightScheme,
+        colorScheme = when (colorTheme) {
+            AppSettings.ColorTheme.BLUE -> if (darkTheme) DarkScheme else LightScheme
+            AppSettings.ColorTheme.FOREST -> if (darkTheme) ForestDarkScheme else ForestLightScheme
+            AppSettings.ColorTheme.AMBER -> if (darkTheme) AmberDarkScheme else AmberLightScheme
+            AppSettings.ColorTheme.ROSE -> if (darkTheme) RoseDarkScheme else RoseLightScheme
+        },
         typography = OpenTvTypography,
         content = content,
     )

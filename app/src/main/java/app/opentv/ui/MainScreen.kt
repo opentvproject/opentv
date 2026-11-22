@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
@@ -76,6 +77,7 @@ import app.opentv.data.model.Series
 import app.opentv.ui.channels.HomeScreen
 import app.opentv.ui.downloads.LibraryScreen
 import app.opentv.ui.vod.MoviesScreen
+import app.opentv.ui.vod.MyViewScreen
 import app.opentv.ui.vod.SeriesScreen
 
 /**
@@ -85,6 +87,7 @@ import app.opentv.ui.vod.SeriesScreen
  * rather than pushing it, so expanding the menu never reflows the guide underneath.
  */
 enum class Tab(val labelRes: Int, val icon: ImageVector) {
+    MY_VIEW(R.string.nav_my_view, Icons.Filled.History),
     LIVE(R.string.nav_live_tv, Icons.Filled.LiveTv),
     MOVIES(R.string.nav_movies, Icons.Filled.Movie),
     SHOWS(R.string.nav_shows, Icons.Filled.Tv),
@@ -123,6 +126,7 @@ fun MainScreen(
     val seriesEnabled by settings.seriesEnabled.collectAsState()
     val visibleTabs = remember(liveEnabled, moviesEnabled, seriesEnabled) {
         buildList {
+            add(Tab.MY_VIEW)
             if (liveEnabled) add(Tab.LIVE)
             if (moviesEnabled) add(Tab.MOVIES)
             if (seriesEnabled) add(Tab.SHOWS)
@@ -182,6 +186,11 @@ fun MainScreen(
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
+                Tab.MY_VIEW -> MyViewScreen(
+                    onOpenMovie = onOpenMovie,
+                    onOpenSeries = onOpenSeries,
+                    onResume = onResume,
+                )
                 Tab.LIVE -> HomeScreen(
                     isTelevision = isTelevision,
                     hasSources = hasSources,

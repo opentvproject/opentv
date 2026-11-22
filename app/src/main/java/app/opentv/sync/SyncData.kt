@@ -41,6 +41,12 @@ data class SyncBundle(
     /** Favourite series, keyed by the provider's own series id (series carry no stream URL). */
     val favouriteSeries: List<String> = emptyList(),
     val hiddenCategories: List<String> = emptyList(),
+    val userHiddenLiveCategories: List<String> = emptyList(),
+    val liveCategoryOrder: List<String> = emptyList(),
+    val userHiddenMovieCategories: List<String> = emptyList(),
+    val movieCategoryOrder: List<String> = emptyList(),
+    val userHiddenSeriesCategories: List<String> = emptyList(),
+    val seriesCategoryOrder: List<String> = emptyList(),
     /**
      * Recordings that live on the shared NAS (their [SyncRecording.filePath] is an `smb://`
      * locator) and so play on any device pointed at the same NAS. Device-local recordings are

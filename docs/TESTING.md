@@ -22,6 +22,25 @@ bash test-run.sh        # reinstalls, launches, records to testrun.log, shows a 
 | F | State survives | Favourites/hidden survive a refresh and an app restart |
 | G | Fast switching | Holding channel-change never wedges playback (one tune when you stop) |
 
+## Recent feature checks
+
+Run the automated unit tests before device checks:
+
+```bash
+./gradlew testDebugUnitTest
+```
+
+| Area | Check | Pass looks like |
+|---|---|---|
+| Category settings | Hide/reorder Live TV, Movies and Shows categories, including with multiple providers; leave and reopen settings | Visibility and order persist, source-specific categories stay separate, and hidden entries remain manageable |
+| Movies/Shows navigation | Switch provider, All, and individual categories from the left rail | The selected category grid belongs to the selected provider; returning to All restores home shelves |
+| My Views | Play a movie/episode, change profiles, use only the remote to focus and clear one card, clear a show, then clear all | Remove buttons have a clear d-pad focus state; history is profile-specific; >95% is Watched; clearing a show removes its episode entries; clearing all is confirmed |
+| Next episode | Play an episode with a following episode, then one at the end of a series | Prompt appears in the final minute only when a next episode exists; Play Next advances immediately; Dismiss prevents auto-advance |
+| Seeking | Drag the VOD timeline and use remote left/right while it has focus | Drag seeks to the selected position; remote directions seek in 10-second increments |
+| External subtitles | Choose SRT, VTT, SSA/ASS or TTML for a movie and an episode | Subtitle loads and playback resumes near the current position; unsupported formats show a message; a device without a file-picker app does not crash |
+| Display | Change language, size and color palette; test both Light and Dark | Language reloads correctly; size applies across screens; each palette remains readable in both modes and preferences survive restart |
+| Memory | Toggle live preview off, visit Movies/Shows, then navigate away and back | No preview stream runs while disabled; category grids remain responsive; feeds repopulate when returning |
+
 ## Reading the log
 
 Interesting lines and what they mean:

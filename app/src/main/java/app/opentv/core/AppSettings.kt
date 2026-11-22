@@ -6,6 +6,7 @@
 package app.opentv.core
 
 import android.content.Context
+import app.opentv.data.model.StreamKind
 import app.opentv.data.model.StremioAddon
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,32 @@ class AppSettings private constructor(context: Context) {
 
     private val _themeMode = MutableStateFlow(readThemeMode())
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    /** Accent palette, independent of the light/dark appearance mode. */
+    enum class ColorTheme { BLUE, FOREST, AMBER, ROSE }
+
+    private val _colorTheme = MutableStateFlow(readColorTheme())
+    val colorTheme: StateFlow<ColorTheme> = _colorTheme.asStateFlow()
+
+    fun setColorTheme(theme: ColorTheme) {
+        prefs.edit().putString(KEY_COLOR_THEME, theme.name).apply()
+        _colorTheme.value = theme
+    }
+
+    /** Overall UI scale. Recommended preserves the app's current sizing. */
+    enum class UiScale(val factor: Float) {
+        SMALL(0.85f),
+        RECOMMENDED(1f),
+        LARGE(1.15f),
+    }
+
+    private val _uiScale = MutableStateFlow(readUiScale())
+    val uiScale: StateFlow<UiScale> = _uiScale.asStateFlow()
+
+    fun setUiScale(scale: UiScale) {
+        prefs.edit().putString(KEY_UI_SCALE, scale.name).apply()
+        _uiScale.value = scale
+    }
 
     /**
      * How the live-TV channel list is laid out: the scrolling EPG time-[ChannelLayout.GRID], or a
@@ -168,6 +195,118 @@ class AppSettings private constructor(context: Context) {
 
     fun setHiddenUnlocked(unlocked: Boolean) {
         _hiddenUnlocked.value = unlocked
+    }
+
+    // ---- User category visibility and ordering (TV channels, shows, VOD) ---------------------
+
+    /** User-hidden Live TV category group keys (independent of parental lock). */
+    private val _userHiddenLiveCategories =
+        MutableStateFlow(prefs.getStringSet(KEY_USER_HIDDEN_LIVE_CATS, emptySet())!!.toSet())
+    val userHiddenLiveCategories: StateFlow<Set<String>> = _userHiddenLiveCategories.asStateFlow()
+
+    /** Live TV custom category order (ordered list of group keys). */
+    private val _liveCategoryOrder =
+        MutableStateFlow(readStringList(KEY_LIVE_CAT_ORDER))
+    val liveCategoryOrder: StateFlow<List<String>> = _liveCategoryOrder.asStateFlow()
+
+    /** User-hidden Movie (VOD) category IDs/names. */
+    private val _userHiddenMovieCategories =
+        MutableStateFlow(prefs.getStringSet(KEY_USER_HIDDEN_MOVIE_CATS, emptySet())!!.toSet())
+    val userHiddenMovieCategories: StateFlow<Set<String>> = _userHiddenMovieCategories.asStateFlow()
+
+    /** Movie (VOD) custom category order (ordered list of category IDs/names). */
+    private val _movieCategoryOrder =
+        MutableStateFlow(readStringList(KEY_MOVIE_CAT_ORDER))
+    val movieCategoryOrder: StateFlow<List<String>> = _movieCategoryOrder.asStateFlow()
+
+    /** User-hidden Series (Shows) category IDs/names. */
+    private val _userHiddenSeriesCategories =
+        MutableStateFlow(prefs.getStringSet(KEY_USER_HIDDEN_SERIES_CATS, emptySet())!!.toSet())
+    val userHiddenSeriesCategories: StateFlow<Set<String>> = _userHiddenSeriesCategories.asStateFlow()
+
+    /** Series (Shows) custom category order (ordered list of category IDs/names). */
+    private val _seriesCategoryOrder =
+        MutableStateFlow(readStringList(KEY_SERIES_CAT_ORDER))
+    val seriesCategoryOrder: StateFlow<List<String>> = _seriesCategoryOrder.asStateFlow()
+
+    fun setUserHiddenLiveCategories(keys: Set<String>) {
+        prefs.edit().putStringSet(KEY_USER_HIDDEN_LIVE_CATS, keys).apply()
+        _userHiddenLiveCategories.value = keys.toSet()
+    }
+
+    fun setLiveCategoryOrder(keys: List<String>) {
+        persistStringList(KEY_LIVE_CAT_ORDER, keys)
+        _liveCategoryOrder.value = keys
+    }
+
+    fun setUserHiddenMovieCategories(keys: Set<String>) {
+        prefs.edit().putStringSet(KEY_USER_HIDDEN_MOVIE_CATS, keys).apply()
+        _userHiddenMovieCategories.value = keys.toSet()
+    }
+
+    fun setMovieCategoryOrder(keys: List<String>) {
+        persistStringList(KEY_MOVIE_CAT_ORDER, keys)
+        _movieCategoryOrder.value = keys
+    }
+
+    fun setUserHiddenSeriesCategories(keys: Set<String>) {
+        prefs.edit().putStringSet(KEY_USER_HIDDEN_SERIES_CATS, keys).apply()
+        _userHiddenSeriesCategories.value = keys.toSet()
+    }
+
+    fun setSeriesCategoryOrder(keys: List<String>) {
+        persistStringList(KEY_SERIES_CAT_ORDER, keys)
+        _seriesCategoryOrder.value = keys
+    }
+
+    fun isCategoryHidden(kind: StreamKind, key: String): Boolean = when (kind) {
+        StreamKind.LIVE -> key in _userHiddenLiveCategories.value
+        StreamKind.MOVIE -> key in _userHiddenMovieCategories.value
+        StreamKind.SERIES -> key in _userHiddenSeriesCategories.value
+    }
+
+    fun toggleCategoryHidden(kind: StreamKind, key: String) {
+        when (kind) {
+            StreamKind.LIVE -> {
+                val current = _userHiddenLiveCategories.value.toMutableSet()
+                if (key in current) current.remove(key) else current.add(key)
+                setUserHiddenLiveCategories(current)
+            }
+            StreamKind.MOVIE -> {
+                val current = _userHiddenMovieCategories.value.toMutableSet()
+                if (key in current) current.remove(key) else current.add(key)
+                setUserHiddenMovieCategories(current)
+            }
+            StreamKind.SERIES -> {
+                val current = _userHiddenSeriesCategories.value.toMutableSet()
+                if (key in current) current.remove(key) else current.add(key)
+                setUserHiddenSeriesCategories(current)
+            }
+        }
+    }
+
+    fun resetCategoryOrder(kind: StreamKind) {
+        when (kind) {
+            StreamKind.LIVE -> setLiveCategoryOrder(emptyList())
+            StreamKind.MOVIE -> setMovieCategoryOrder(emptyList())
+            StreamKind.SERIES -> setSeriesCategoryOrder(emptyList())
+        }
+    }
+
+    fun showAllCategories(kind: StreamKind) {
+        when (kind) {
+            StreamKind.LIVE -> setUserHiddenLiveCategories(emptySet())
+            StreamKind.MOVIE -> setUserHiddenMovieCategories(emptySet())
+            StreamKind.SERIES -> setUserHiddenSeriesCategories(emptySet())
+        }
+    }
+
+    fun hideAllCategories(kind: StreamKind, allKeys: Set<String>) {
+        when (kind) {
+            StreamKind.LIVE -> setUserHiddenLiveCategories(allKeys)
+            StreamKind.MOVIE -> setUserHiddenMovieCategories(allKeys)
+            StreamKind.SERIES -> setUserHiddenSeriesCategories(allKeys)
+        }
     }
 
     private fun hashPin(pin: String): String {
@@ -327,6 +466,14 @@ class AppSettings private constructor(context: Context) {
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "") }
             .getOrDefault(ThemeMode.SYSTEM)
 
+    private fun readColorTheme(): ColorTheme =
+        runCatching { ColorTheme.valueOf(prefs.getString(KEY_COLOR_THEME, null) ?: "") }
+            .getOrDefault(ColorTheme.BLUE)
+
+    private fun readUiScale(): UiScale =
+        runCatching { UiScale.valueOf(prefs.getString(KEY_UI_SCALE, null) ?: "") }
+            .getOrDefault(UiScale.RECOMMENDED)
+
     private fun readChannelLayout(): ChannelLayout =
         runCatching { ChannelLayout.valueOf(prefs.getString(KEY_CHANNEL_LAYOUT, null) ?: "") }
             .getOrDefault(ChannelLayout.GRID)
@@ -482,8 +629,19 @@ class AppSettings private constructor(context: Context) {
             prefs.getString(KEY_STREMIO_ADDONS, null)?.let { addonJson.decodeFromString<List<StremioAddon>>(it) }
         }.getOrNull() ?: emptyList()
 
+    private fun readStringList(key: String): List<String> =
+        runCatching {
+            prefs.getString(key, null)?.let { addonJson.decodeFromString<List<String>>(it) }
+        }.getOrNull() ?: emptyList()
+
+    private fun persistStringList(key: String, list: List<String>) {
+        prefs.edit().putString(key, addonJson.encodeToString(list)).apply()
+    }
+
     companion object {
         private const val KEY_THEME = "theme_mode"
+        private const val KEY_COLOR_THEME = "color_theme"
+        private const val KEY_UI_SCALE = "ui_scale"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
         private const val KEY_SUBTITLES = "subtitles_enabled"
         private const val KEY_STATS_OVERLAY = "stats_overlay_enabled"
@@ -496,6 +654,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
+        private const val KEY_USER_HIDDEN_LIVE_CATS = "user_hidden_live_cats"
+        private const val KEY_LIVE_CAT_ORDER = "live_cat_order"
+        private const val KEY_USER_HIDDEN_MOVIE_CATS = "user_hidden_movie_cats"
+        private const val KEY_MOVIE_CAT_ORDER = "movie_cat_order"
+        private const val KEY_USER_HIDDEN_SERIES_CATS = "user_hidden_series_cats"
+        private const val KEY_SERIES_CAT_ORDER = "series_cat_order"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
         private const val KEY_CONTENT_LIVE = "content_live"

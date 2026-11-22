@@ -166,9 +166,11 @@ class CatalogRepository(
 
     fun observeCategories(kind: StreamKind): Flow<List<Category>> = categoryDao.observe(kind)
 
-    fun observeMovies(categoryId: String? = null): Flow<List<Movie>> = movieDao.observe(categoryId)
+    fun observeMovies(categoryId: String? = null, sourceId: Long? = null): Flow<List<Movie>> =
+        movieDao.observe(categoryId, sourceId)
 
-    fun observeSeries(categoryId: String? = null): Flow<List<Series>> = seriesDao.observe(categoryId)
+    fun observeSeries(categoryId: String? = null, sourceId: Long? = null): Flow<List<Series>> =
+        seriesDao.observe(categoryId, sourceId)
 
     fun observeEpisodes(sourceId: Long, seriesId: String): Flow<List<Episode>> =
         episodeDao.observeForSeries(sourceId, seriesId)
@@ -196,6 +198,19 @@ class CatalogRepository(
     }
 
     suspend fun episode(id: Long): Episode? = episodeDao.byId(id)
+
+    suspend fun nextEpisode(episodeId: Long): Episode? {
+        val current = episodeDao.byId(episodeId) ?: return null
+        return episodeDao.nextForSeries(
+            current.sourceId,
+            current.seriesId,
+            current.season,
+            current.episodeNumber,
+        )
+    }
+
+    suspend fun seriesForEpisode(sourceId: Long, seriesId: String): Series? =
+        seriesDao.byProviderId(sourceId, seriesId)
 
     suspend fun movieByStreamUrl(url: String): Movie? = movieDao.byStreamUrl(url)
 
