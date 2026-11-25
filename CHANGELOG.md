@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 - **Playback diagnostics: find out why it buffers, and get moved to a stream that doesn't.**
   Every channel you watch is now measured in the background — how long it took to start, how often
