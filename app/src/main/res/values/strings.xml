@@ -9,6 +9,34 @@
     <string name="common_save">Save</string>
     <string name="common_remove">Remove</string>
     <string name="common_edit">Edit</string>
+
+    <!-- Offline downloads -->
+    <string name="nav_downloads">Downloads</string>
+    <string name="dl_screen_title">Downloads</string>
+    <string name="dl_screen_desc">Movies and shows saved to your storage for offline viewing.</string>
+    <string name="dl_empty_state">Nothing downloaded yet. Open a movie or episode and choose Download.</string>
+    <string name="dl_status_queued">Queued</string>
+    <string name="dl_status_downloading">Downloading %1$d%% · %2$s</string>
+    <string name="dl_status_failed">Failed: %1$s</string>
+    <string name="dl_channel_name">Downloads</string>
+    <string name="dl_channel_desc">Shows progress while a movie or show downloads.</string>
+    <string name="dl_notification_title">OpenTV — downloading</string>
+    <string name="vod_download">Download</string>
+    <string name="vod_downloading_pct">Downloading %1$d%%</string>
+    <string name="vod_download_queued">Queued…</string>
+    <string name="vod_downloaded">Downloaded</string>
+    <string name="vod_download_retry">Retry</string>
+    <string name="vod_start_over">Start from beginning</string>
+    <string name="vod_resume_at">You stopped at %1$s</string>
+
+    <!-- Library (downloads + recordings) -->
+    <string name="nav_library">Library</string>
+    <string name="library_films">Films</string>
+    <string name="library_shows">TV Shows</string>
+    <string name="library_recordings">Recordings</string>
+    <string name="library_empty_films">No films downloaded yet. Open a film and choose Download.</string>
+    <string name="library_empty_shows">No shows downloaded yet. Open an episode and choose Download.</string>
+    <string name="library_downloaded_on">Downloaded %1$s</string>
     <string name="common_play">Play</string>
     <string name="common_stop">Stop</string>
     <string name="common_delete">Delete</string>
@@ -125,6 +153,8 @@
     <string name="player_record">Record</string>
     <string name="player_pop_out">Pop out</string>
     <string name="player_last">Last</string>
+    <string name="player_info">Info</string>
+    <string name="player_info_hint">Press Info for full programme details</string>
     <string name="player_quality_standard">Standard</string>
     <string name="player_aspect_fit">Fit</string>
     <string name="player_aspect_fill">Fill</string>

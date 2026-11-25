@@ -25,6 +25,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
@@ -57,11 +60,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.data.model.DownloadStatus
 import app.opentv.data.model.Episode
 import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
 import app.opentv.data.model.StremioStream
 import app.opentv.data.parser.displayTitle
+import app.opentv.data.work.Downloads
 import app.opentv.ui.VodViewModel
 import coil.compose.AsyncImage
 import androidx.compose.ui.window.Dialog
@@ -79,6 +84,7 @@ fun MovieDetailScreen(
     movieId: Long,
     onPlay: (Movie) -> Unit,
     onPlayUrl: (key: String, url: String, title: String) -> Unit,
+    onDownload: (Movie) -> Unit,
     onOpenMovie: (Movie) -> Unit,
     onOpenPerson: (String) -> Unit,
     viewModel: VodViewModel = viewModel(),
@@ -92,6 +98,7 @@ fun MovieDetailScreen(
     // null = the add-on picker is closed; a (possibly empty) list = show it. Separate flag for the spinner.
     var addonStreams by remember(movieId) { mutableStateOf<List<StremioStream>?>(null) }
     var addonLoading by remember(movieId) { mutableStateOf(false) }
+    val downloadState by viewModel.downloadFlow("movie:$movieId").collectAsState(initial = null)
 
     LaunchedEffect(movieId) {
         val loaded = viewModel.movieDetail(movieId)
@@ -119,6 +126,30 @@ fun MovieDetailScreen(
                     primary = true,
                     modifier = Modifier.focusRequester(playFocus),
                 ) { onPlay(m) }
+                val dl = downloadState
+                DetailButton(
+                    icon = when {
+                        dl?.status == DownloadStatus.COMPLETED -> Icons.Filled.DownloadDone
+                        dl?.status == DownloadStatus.DOWNLOADING || dl?.status == DownloadStatus.QUEUED -> Icons.Filled.Downloading
+                        else -> Icons.Filled.Download
+                    },
+                    label = when {
+                        dl?.status == DownloadStatus.COMPLETED -> stringResource(R.string.vod_downloaded)
+                        dl?.status == DownloadStatus.DOWNLOADING -> stringResource(
+                            R.string.vod_downloading_pct,
+                            if (dl.totalBytes > 0) ((dl.downloadedBytes * 100L) / dl.totalBytes).toInt() else 0,
+                        )
+                        dl?.status == DownloadStatus.QUEUED -> stringResource(R.string.vod_download_queued)
+                        else -> stringResource(R.string.vod_download)
+                    },
+                ) {
+                    when {
+                        dl?.status == DownloadStatus.COMPLETED ->
+                            onPlayUrl("movie:${m.id}", Downloads.playbackUrl(dl.filePath), m.displayTitle)
+                        dl?.status == DownloadStatus.DOWNLOADING || dl?.status == DownloadStatus.QUEUED -> Unit
+                        else -> onDownload(m)
+                    }
+                }
                 DetailButton(
                     icon = if (m.favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
                     label = stringResource(if (m.favourite) R.string.common_remove_favourite else R.string.common_favourite),
@@ -335,7 +366,7 @@ fun SeriesDetailScreen(
                     SectionHeader(stringResource(R.string.vod_season, season))
                 }
                 items(eps, key = { it.id }) { ep ->
-                    EpisodeRow(ep, onPlayEpisode)
+                    EpisodeRow(ep, onPlayEpisode) { viewModel.downloadEpisode(ep, s) }
                 }
             }
         }
@@ -649,7 +680,11 @@ private fun DetailButton(
 
 /** One episode row: season/episode marker, title, and a focus highlight; plays on click. */
 @Composable
-private fun EpisodeRow(ep: Episode, onPlay: (mediaKey: String, url: String, title: String) -> Unit) {
+private fun EpisodeRow(
+    ep: Episode,
+    onPlay: (mediaKey: String, url: String, title: String) -> Unit,
+    onDownload: (Episode) -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
@@ -682,7 +717,28 @@ private fun EpisodeRow(ep: Episode, onPlay: (mediaKey: String, url: String, titl
             style = MaterialTheme.typography.bodyLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        Spacer(Modifier.width(8.dp))
+        EpisodeDownloadButton { onDownload(ep) }
+    }
+}
+
+/** A trailing "download this episode" affordance; the row itself still plays on click. */
+@Composable
+private fun EpisodeDownloadButton(onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val bg = if (focused) MaterialTheme.colorScheme.primary else Color.Transparent
+    val fg = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+    ) {
+        Icon(Icons.Filled.Download, contentDescription = stringResource(R.string.vod_download), tint = fg)
     }
 }
 

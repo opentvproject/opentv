@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **A channel banner when you zap, and full programme detail on Info.** Changing channel now
+  flashes a compact banner — channel number, logo, name, what's on with its times and a progress
+  bar, and what's next. It appears the instant you press the key, before the picture loads and
+  even if the stream fails, so you can keep zapping without waiting for each channel to come up.
+  Press **Info** (or the Info button on the player bar, for remotes without one) to expand it into
+  the full synopsis, series/episode and genre. Channel surfing is also debounced now, so holding
+  channel-up only opens the channel you settle on instead of starting a stream for every one you
+  pass through.
+- **Download films and shows for offline viewing, in a new Library.** Open a film or episode and
+  choose **Download** — it saves to your recording storage (internal, USB or NAS) and appears in the
+  new **Library** tab, which brings your downloaded **Films** (grouped by genre), **TV Shows**
+  (grouped by series) and your **Recordings** together in one place — each with artwork, year, genre
+  and download date. Downloads run in the background with a progress bar, keep their resume point,
+  and the poster is saved too so the Library looks right even fully offline.
+- **Smoother NAS playback.** Recordings and downloads stored on a NAS now reuse a single SMB
+  connection while you watch, instead of reconnecting on every seek — fixing the constant buffering
+  that random-access seeking a movie over the network used to cause.
+
 ## 0.11.10
 
 - **Fire TV: app row fix, take two.** v0.11.9 replaced the placeholder artwork but the stick still

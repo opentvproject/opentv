@@ -13,6 +13,7 @@ import app.opentv.data.model.Category
 import app.opentv.data.model.Channel
 import app.opentv.data.model.EpgFeed
 import app.opentv.data.model.LiveStreamFormat
+import app.opentv.data.model.Episode
 import app.opentv.data.model.Movie
 import app.opentv.data.model.PlaybackPosition
 import app.opentv.data.model.Profile
@@ -1049,6 +1050,35 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
     /** The active profile's saved resume position for a movie/episode, or null — drives Resume vs Watch now. */
     suspend fun resumePosition(mediaKey: String): PlaybackPosition? =
         graph.playbackPositions.get(settings.activeProfileId.value, mediaKey)
+
+    /** Live download state for a movie/episode (drives the detail screen's Download button). */
+    fun downloadFlow(mediaKey: String): kotlinx.coroutines.flow.Flow<app.opentv.data.model.Download?> =
+        graph.downloadRepository.observeByMediaKey(mediaKey)
+
+    /** Queue a movie for offline download to the user's recording storage. */
+    fun downloadMovie(movie: Movie) {
+        viewModelScope.launch {
+            app.opentv.data.work.Downloads.start(
+                getApplication(), "movie:${movie.id}", movie.displayTitle, movie.posterUrl,
+                movie.streamUrl, movie.sourceId, movie.containerExtension,
+                year = movie.year, genre = movie.genre, plot = movie.plot,
+            )
+        }
+    }
+
+    /** Queue a show episode for offline download, carrying its show's metadata for the Library. */
+    fun downloadEpisode(ep: Episode, series: Series? = null) {
+        viewModelScope.launch {
+            app.opentv.data.work.Downloads.start(
+                getApplication(), "ep:${ep.id}",
+                "S${ep.season}E${ep.episodeNumber} · ${ep.title}",
+                ep.stillUrl ?: series?.posterUrl,
+                ep.streamUrl, ep.sourceId, null,
+                year = series?.year, genre = series?.genre, plot = ep.plot,
+                seriesTitle = series?.displayTitle, season = ep.season, episodeNumber = ep.episodeNumber,
+            )
+        }
+    }
 
     /** Collapses quality variants of a movie list for a browse grid. See CatalogRepository.collapseVariants. */
     fun collapseVariants(movies: List<Movie>): List<MovieVariantGroup> =

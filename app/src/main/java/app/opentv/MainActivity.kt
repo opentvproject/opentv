@@ -339,6 +339,11 @@ private fun OpenTvApp(isTelevision: Boolean) {
                             Routes.vodPlayer(key, url, title, "OpenTV/0.1 (Android)"),
                         )
                     },
+                    onPlayDownload = { key, url, title ->
+                        navController.navigate(
+                            Routes.vodPlayer(key, url, title, "OpenTV/0.1 (Android)"),
+                        )
+                    },
                     onAddSource = { navController.navigate(Routes.ADD_SOURCE) },
                     onRefresh = sourcesViewModel::refreshAll,
                     onOpenSearch = { navController.navigate(Routes.SEARCH) },
@@ -507,6 +512,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                             Routes.vodPlayer(key = key, url = url, title = title, ua = "OpenTV/0.1 (Android)"),
                         )
                     },
+                    onDownload = { movie -> vodViewModel.downloadMovie(movie) },
                     onOpenMovie = { movie -> navController.navigate(Routes.movieDetail(movie.id)) },
                     onOpenPerson = { name -> navController.navigate(Routes.person(name)) },
                 )

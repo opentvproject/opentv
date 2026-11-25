@@ -494,3 +494,49 @@ data class Reminder(
     /** Set once the alarm has fired, so a boot re-arm skips it and the list can grey it out. */
     val fired: Boolean = false,
 )
+
+enum class DownloadStatus { QUEUED, DOWNLOADING, COMPLETED, FAILED }
+
+/**
+ * An offline download of a VOD movie or episode.
+ *
+ * The file is fetched over HTTP from [streamUrl] and written to the user's chosen recording storage
+ * (internal / USB / NAS) via [app.opentv.recording.RecordingStorage] — so [filePath] is an absolute
+ * path, an `smb://` locator, or a `content://` document URI, exactly like a recording, and it plays
+ * back through the same VOD player once [status] is COMPLETED. [mediaKey] ("movie:{id}" / "ep:{id}")
+ * ties it to the catalogue row for its poster and to its resume position.
+ */
+@Entity(tableName = "downloads", indices = [Index(value = ["status"])])
+data class Download(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sourceId: Long,
+    /** "movie:{Movie.id}" or "ep:{Episode.id}" — links to the catalogue row and resume position. */
+    val mediaKey: String,
+    /** Title snapshot for the Downloads list (survives a catalogue re-sync). */
+    val title: String,
+    /** Optional poster/still for the Downloads card. */
+    val posterUrl: String? = null,
+    /** The HTTP URL the file is fetched from. */
+    val streamUrl: String,
+    /** User-Agent to fetch with (some panels only serve a UA they recognise). */
+    val userAgent: String = Source.DEFAULT_USER_AGENT,
+    /** Where the file lives: absolute path (internal), `smb://` (NAS) or `content://` (USB/SAF). */
+    val filePath: String,
+    val status: DownloadStatus,
+    val totalBytes: Long = 0,
+    val downloadedBytes: Long = 0,
+    val createdAtMillis: Long = 0,
+    /** Human-readable reason when [status] is FAILED. */
+    val error: String? = null,
+    // ---- Offline-library metadata (v13) ----
+    /** A locally-saved copy of the poster, so artwork shows even fully offline. */
+    val posterPath: String? = null,
+    val year: Int? = null,
+    /** Provider genre ("Comedy", "Comedy, Drama") — drives the Library's category grouping. */
+    val genre: String? = null,
+    val plot: String? = null,
+    /** For episodes: the show name (Library groups TV Shows by this) and its season/episode. */
+    val seriesTitle: String? = null,
+    val season: Int? = null,
+    val episodeNumber: Int? = null,
+)

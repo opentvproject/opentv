@@ -268,6 +268,7 @@ class PlayerController(
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
 
+            android.util.Log.d("PlayReq", "url='${request.url}' isLive=${request.isLive} title='${request.title}'")
             consecutiveFailures = 0
             httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
             _state.value = State.Buffering(request.title)
@@ -370,6 +371,8 @@ class PlayerController(
     fun release() {
         switchJob?.cancel()
         player.release()
+        // Drop the shared NAS playback connection when the player goes away.
+        runCatching { app.opentv.recording.SmbClient.releaseReadCache() }
     }
 
     private companion object {

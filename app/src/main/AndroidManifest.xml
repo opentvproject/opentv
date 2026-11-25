@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Offline downloads: a finite file transfer runs as a foreground worker (dataSync type). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Scheduled recordings: an exact alarm starts a booked capture at broadcast time, and the
@@ -57,6 +59,7 @@
         android:banner="@drawable/banner"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
+        android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenTV"
         android:usesCleartextTraffic="true"
@@ -66,6 +69,11 @@
           usesCleartextTraffic is on because the overwhelming majority of IPTV panels are
           plain HTTP. Refusing them would make the app useless for most of its users. The
           trade-off is documented in docs/PRIVACY.md.
+
+          largeHeap is on because a big provider's catalogue (20k+ channels, plus VOD) is
+          parsed and re-indexed when it's added or switched — the transient peak can exceed a
+          2 GB TV box's default heap and OOM mid-sync. The extra headroom keeps the switch alive
+          while the streaming/paging work that would remove the peak entirely is done separately.
         -->
 
         <activity
@@ -105,6 +113,17 @@
             android:name=".recording.RecordingService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!--
+          Offline VOD downloads run as a WorkManager foreground worker, which uses WorkManager's own
+          SystemForegroundService (merged in from the library). Typed dataSync — a finite file
+          transfer — so Android 14's ~6h/day dataSync cap is ample. This node only adds the
+          foreground-service type the worker needs on Android 14+.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- Starts a booked recording when its alarm fires; re-arms bookings after a reboot. -->
         <receiver
