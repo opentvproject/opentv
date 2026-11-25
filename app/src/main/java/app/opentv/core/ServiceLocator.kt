@@ -11,6 +11,7 @@ import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.StremioClient
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.repo.CatalogRepository
+import app.opentv.data.repo.DownloadRepository
 import app.opentv.data.repo.EpgRepository
 import app.opentv.data.repo.RecordingRepository
 import app.opentv.data.repo.ReminderRepository
@@ -124,6 +125,10 @@ object ServiceLocator {
 
         val reminderRepository: ReminderRepository by lazy {
             ReminderRepository(database.reminders())
+        }
+
+        val downloadRepository: DownloadRepository by lazy {
+            DownloadRepository(database.downloads())
         }
 
         val recordingEngine: RecordingEngine by lazy {

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
@@ -65,6 +66,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -101,6 +103,7 @@ import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
+import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
@@ -178,6 +181,20 @@ fun PlayerScreen(
     var resizeMode by remember { mutableIntStateOf(settings.playerResizeMode.value) }
 
     var controlsVisible by remember { mutableStateOf(true) }
+
+    // ---- Channel banner ----------------------------------------------------------------
+    // The channel the banner is describing, and the guide data for it. [bannerChannelId] is set
+    // synchronously on every switch so the banner is on screen before anything touches the
+    // network; the programme fields fill in a moment later.
+    var bannerChannelId by remember { mutableStateOf<Long?>(null) }
+    var bannerItem by remember { mutableStateOf<PlaybackQueue.Item?>(null) }
+    var bannerNow by remember { mutableStateOf<Programme?>(null) }
+    var bannerNext by remember { mutableStateOf<Programme?>(null) }
+    var bannerVisible by remember { mutableStateOf(false) }
+    var infoExpanded by remember { mutableStateOf(false) }
+    var bannerInteraction by remember { mutableIntStateOf(0) }
+    // Drives the now/next progress bar. Ticked only while the banner is up.
+    var clockMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf(Panel.NONE) }
     var channelListVisible by remember { mutableStateOf(false) }
     var interaction by remember { mutableIntStateOf(0) }
@@ -213,10 +230,37 @@ fun PlayerScreen(
 
     fun reveal() {
         controlsVisible = true
+        // One thing at the bottom of the screen at a time. The control bar already names the
+        // channel, so a banner behind it would just be the same text twice.
+        bannerVisible = false
+        infoExpanded = false
         interaction++
     }
 
-    fun tuneTo(channel: Channel) {
+    /**
+     * Flashes the channel banner for [id], optionally straight into its expanded form.
+     *
+     * Called with the *target* channel on a zap, before the tune is even requested — that is what
+     * makes the banner instant and lets the user keep zapping without waiting for pictures.
+     */
+    fun showBanner(id: Long?, expand: Boolean = false) {
+        if (id == null) return
+        // Clear stale programme text when the channel actually changes, so the banner never shows
+        // the previous channel's programme against the new channel's name.
+        if (bannerChannelId != id) {
+            bannerNow = null
+            bannerNext = null
+        }
+        bannerChannelId = id
+        bannerVisible = true
+        if (expand) infoExpanded = true
+        controlsVisible = false
+        panel = Panel.NONE
+        clockMillis = System.currentTimeMillis()
+        bannerInteraction++
+    }
+
+    fun tuneTo(channel: Channel, debounce: Boolean = false) {
         currentId = channel.id
         paused = false
         settings.lastChannelId = channel.id
@@ -231,19 +275,19 @@ fun PlayerScreen(
                     userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                     isLive = true,
                 ),
-                debounce = false,
+                debounce = debounce,
             )
         }
     }
 
-    fun playChannelId(id: Long) {
+    fun playChannelId(id: Long, debounce: Boolean = false) {
         // Remember where we came from so "Last channel" can bounce straight back. Quality switches
         // go through tuneTo directly, so they never count as a channel change here.
         currentId?.let { if (it != id) previousId = it }
         scope.launch {
             val channel = graph.catalogRepository.channel(id) ?: return@launch
             variants = graph.catalogRepository.variants(channel)
-            tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
+            tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel, debounce)
         }
     }
 
@@ -251,7 +295,13 @@ fun PlayerScreen(
         if (queue.isEmpty()) return
         val cur = queue.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
         val next = (cur + delta).coerceIn(0, queue.size - 1)
-        if (next != cur) playChannelId(queue[next].id)
+        if (next == cur) return
+        // Banner first and synchronously — it paints on this frame, from the in-memory queue.
+        showBanner(queue[next].id)
+        // Debounced tune: hold channel-up through ten channels and only the one you settle on is
+        // actually opened. Without this, fast zapping starts (and abandons) a stream per channel,
+        // which is what makes surfing feel like wading on a cheap box.
+        playChannelId(queue[next].id, debounce = true)
     }
 
     fun toggleRecord() {
@@ -273,6 +323,7 @@ fun PlayerScreen(
         val id = channelId ?: return@LaunchedEffect
         val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
         variants = graph.catalogRepository.variants(channel)
+        showBanner(id)
         tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
     }
 
@@ -296,6 +347,43 @@ fun PlayerScreen(
             g.type == C.TRACK_TYPE_TEXT && (0 until g.length).any { g.isTrackSelected(it) }
         }
         if (subtitlesDefault && hasText && !textChosen) controller.setSubtitlesEnabled(true)
+    }
+
+    // Resolve the banner's channel row and its guide data. The queue is checked first because
+    // it is already in memory, so the compact row needs no I/O at all; the database is only
+    // consulted for a channel that isn't in the list being browsed.
+    LaunchedEffect(bannerChannelId) {
+        val id = bannerChannelId ?: return@LaunchedEffect
+        val fromQueue = queue.firstOrNull { it.id == id }
+        if (fromQueue != null) bannerItem = fromQueue
+        val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
+        if (fromQueue == null) {
+            bannerItem = PlaybackQueue.Item(channel.id, channel.shownName, channel.logoUrl, channel.number)
+        }
+        // Every variant's candidates, in trust order — same resolution the guide grid uses, so
+        // the player and the guide never disagree about what's on.
+        val epgIds = graph.catalogRepository.variants(channel).flatMap { it.epgCandidates }.distinct()
+        val (live, upNext) = graph.epgRepository.nowNext(epgIds, System.currentTimeMillis())
+        bannerNow = live
+        bannerNext = upNext
+    }
+
+    // Banner auto-hide. Expanded gets longer, because reading a synopsis takes longer than
+    // reading a channel name.
+    LaunchedEffect(bannerVisible, bannerInteraction, infoExpanded) {
+        if (!bannerVisible) return@LaunchedEffect
+        delay(if (infoExpanded) INFO_TIMEOUT_MILLIS else BANNER_TIMEOUT_MILLIS)
+        bannerVisible = false
+        infoExpanded = false
+    }
+
+    // Tick while the banner is up so the progress bar creeps forward instead of freezing at
+    // whatever it was when the banner appeared.
+    LaunchedEffect(bannerVisible) {
+        while (bannerVisible) {
+            delay(CLOCK_TICK_MILLIS)
+            clockMillis = System.currentTimeMillis()
+        }
     }
 
     // Auto-hide the bar after a few seconds — but never while paused or with a picker open.
@@ -327,6 +415,8 @@ fun PlayerScreen(
         when {
             channelListVisible -> channelListVisible = false
             panel != Panel.NONE -> panel = Panel.NONE
+            infoExpanded -> infoExpanded = false
+            bannerVisible -> bannerVisible = false
             controlsVisible -> controlsVisible = false
             else -> {
                 controller.stop()
@@ -342,7 +432,10 @@ fun PlayerScreen(
         val num = numberEntry.toIntOrNull()
         numberEntry = ""
         val target = num?.let { n -> queue.firstOrNull { it.number == n } }
-        if (target != null) playChannelId(target.id)
+        if (target != null) {
+            showBanner(target.id)
+            playChannelId(target.id)
+        }
     }
 
     // Focus the channel list when it opens; hand focus back to the video catcher when it closes.
@@ -370,16 +463,28 @@ fun PlayerScreen(
                         numberEntry = (numberEntry + digit).take(4)
                         reveal(); interaction++; true
                     }
+                    // Info shows the banner, and a second press expands it to the full synopsis.
+                    // Menu is accepted as an alias because plenty of remotes — Fire TV's included —
+                    // have no Info key at all; those users also get the Info button on the bar.
+                    event.key == Key.Info || event.key == Key.Menu -> {
+                        if (bannerVisible) {
+                            infoExpanded = !infoExpanded
+                            bannerInteraction++
+                        } else {
+                            showBanner(currentId, expand = true)
+                        }
+                        true
+                    }
                     // A picker or the channel list owns the whole d-pad while it's up.
                     channelListVisible || panel != Panel.NONE -> {
                         interaction++
                         false
                     }
                     // Channel up/down works whether or not the bar is showing — this remote has no
-                    // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the bar as a
+                    // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the compact
                     // channel banner, then it auto-hides.
-                    event.key == Key.DirectionUp || event.key == Key.ChannelUp -> { zapBy(-1); reveal(); true }
-                    event.key == Key.DirectionDown || event.key == Key.ChannelDown -> { zapBy(1); reveal(); true }
+                    event.key == Key.DirectionUp || event.key == Key.ChannelUp -> { zapBy(-1); true }
+                    event.key == Key.DirectionDown || event.key == Key.ChannelDown -> { zapBy(1); true }
                     // With the bar up, left/right drive its buttons; let them through.
                     controlsVisible -> {
                         interaction++
@@ -547,6 +652,10 @@ fun PlayerScreen(
                     }
 
                     Spacer(Modifier.width(20.dp))
+                    BarChip(Icons.Filled.Info, stringResource(R.string.player_info), false) {
+                        showBanner(currentId, expand = true)
+                    }
+                    Spacer(Modifier.width(10.dp))
                     BarChip(Icons.Filled.Subtitles, stringResource(R.string.player_subtitles), panel == Panel.SUBTITLES) {
                         panel = if (panel == Panel.SUBTITLES) Panel.NONE else Panel.SUBTITLES; interaction++
                     }
@@ -580,6 +689,26 @@ fun PlayerScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // The channel banner. Mutually exclusive with the control bar: both live at the bottom,
+        // and the bar already carries the channel name.
+        val bannerRow = bannerItem
+        AnimatedVisibility(
+            visible = bannerVisible && !controlsVisible && !inPip && bannerRow != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            if (bannerRow != null) {
+                InfoBanner(
+                    item = bannerRow,
+                    now = bannerNow,
+                    next = bannerNext,
+                    expanded = infoExpanded,
+                    nowMillis = clockMillis,
+                )
             }
         }
 
@@ -899,6 +1028,15 @@ private fun BarChip(
 }
 
 private const val CONTROLS_TIMEOUT_MILLIS = 5_000L
+
+/** How long the compact channel banner stays up after a zap. */
+private const val BANNER_TIMEOUT_MILLIS = 5_000L
+
+/** Longer, for the expanded synopsis — it's there to be read, not glanced at. */
+private const val INFO_TIMEOUT_MILLIS = 15_000L
+
+/** Progress-bar refresh while the banner is up. A minute's drift is invisible on a 4px bar. */
+private const val CLOCK_TICK_MILLIS = 20_000L
 private const val NUMBER_ENTRY_TIMEOUT_MILLIS = 2_000L
 
 /** Maps a remote's number keys (top row and numeric keypad) to a digit, or null for other keys. */

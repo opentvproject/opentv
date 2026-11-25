@@ -5,6 +5,7 @@
  */
 package app.opentv.recording
 
+import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
@@ -59,10 +60,6 @@ class SmbWriteHandle(
  * data source seeks by asking for bytes at an offset; SMB supports exactly that.
  */
 class SmbReadHandle(
-    private val client: SMBClient,
-    private val connection: Connection,
-    private val session: Session,
-    private val share: DiskShare,
     private val file: com.hierynomus.smbj.share.File,
     val length: Long,
 ) : Closeable {
@@ -70,12 +67,10 @@ class SmbReadHandle(
     fun readAt(buffer: ByteArray, fileOffset: Long, bufferOffset: Int, length: Int): Int =
         file.read(buffer, fileOffset, bufferOffset, length)
 
+    // Closes only the per-open file handle; the underlying connection is kept in [SmbClient]'s
+    // playback cache and reused for the next seek, so seeking a NAS movie never reconnects.
     override fun close() {
         runCatching { file.close() }
-        runCatching { share.close() }
-        runCatching { session.close() }
-        runCatching { connection.close() }
-        runCatching { client.close() }
     }
 }
 
@@ -86,6 +81,11 @@ class SmbReadHandle(
  * sessions.
  */
 object SmbClient {
+
+    private const val TAG = "SmbClient"
+
+    /** Keep-alive cadence: well under a typical NAS idle-session timeout, cheap enough to ignore. */
+    private const val KEEPALIVE_INTERVAL_MS = 15_000L
 
     // Bound every SMB operation. Without this a write to a NAS that has gone quiet (a Wi-Fi blip, a
     // drive spinning up, the session dropping) blocks forever — which silently freezes a recording
@@ -161,29 +161,104 @@ object SmbClient {
         }
     }
 
+    // --- Shared playback connection ----------------------------------------------------------
+    // A NAS movie is seeked constantly by the extractor (moov index, sample chunks); a full
+    // TCP+auth reconnect on every seek is what made playback stutter. So reads share ONE keep-alive
+    // connection per NAS, reused across seeks — only the per-open file handle is closed each time.
+    private val readLock = Any()
+    private var readConn: ReadConn? = null
+
+    private class ReadConn(val key: String, val q: Quad) {
+        /** The file currently being played on this connection; the keep-alive stats it. */
+        @Volatile var probePath: String? = null
+    }
+
+    // A NAS closes an idle SMB session, and ExoPlayer goes idle for tens of seconds every time its
+    // buffer fills — so mid-film the cached connection would silently die and the next read stall
+    // while it reconnects. A light keep-alive touches the share on an interval shorter than any
+    // reasonable NAS idle timeout, keeping the session warm through those read pauses so playback
+    // never has to reconnect at all. One daemon thread for the app's life; it no-ops when nothing is
+    // playing.
+    private var keepAliveStarted = false
+
+    private fun ensureKeepAlive() {
+        synchronized(readLock) {
+            if (keepAliveStarted) return
+            keepAliveStarted = true
+        }
+        Thread {
+            while (true) {
+                try {
+                    Thread.sleep(KEEPALIVE_INTERVAL_MS)
+                } catch (e: InterruptedException) {
+                    // ignored — loop and re-check
+                }
+                // Snapshot under the lock (quick), then probe outside it: a stat can block up to the
+                // socket timeout, and holding the lock that long would stall real reads. A share that
+                // was closed underneath us just throws here and is picked up on the next read.
+                val conn = synchronized(readLock) { readConn }
+                val path = conn?.probePath
+                if (conn != null && path != null) {
+                    runCatching { conn.q.share.fileExists(path) }
+                        .onFailure { Log.d(TAG, "keep-alive probe failed; next read will reconnect") }
+                }
+            }
+        }.apply { isDaemon = true; name = "smb-keepalive"; start() }
+    }
+
+    private fun closeQuad(q: Quad) {
+        runCatching { q.share.close() }
+        runCatching { q.session.close() }
+        runCatching { q.connection.close() }
+        runCatching { q.client.close() }
+    }
+
+    /** The live share for [cfg], reusing the cached connection while it's still up. */
+    private fun readShare(cfg: SmbConfig): DiskShare {
+        ensureKeepAlive()
+        val key = "${cfg.username}@${cfg.host}/${cfg.share}"
+        synchronized(readLock) {
+            val existing = readConn
+            if (existing != null && existing.key == key &&
+                runCatching { existing.q.connection.isConnected }.getOrDefault(false)
+            ) {
+                return existing.q.share
+            }
+            existing?.let { closeQuad(it.q) }
+            val q = connect(cfg)
+            readConn = ReadConn(key, q)
+            return q.share
+        }
+    }
+
+    /** Drop the shared playback connection (e.g. when the player is released). Safe to call anytime. */
+    fun releaseReadCache() {
+        synchronized(readLock) {
+            readConn?.let { closeQuad(it.q) }
+            readConn = null
+        }
+    }
+
     /** Open an existing `smb://host/share/path` locator for random-access reading (playback). */
     fun openForRead(config: SmbConfig, locator: String): SmbReadHandle {
         val parsed = parse(locator)
         val cfg = config.copy(host = parsed.host, share = parsed.share)
-        val q = connect(cfg)
-        try {
-            val file = q.share.openFile(
-                parsed.path.replace('/', '\\'),
-                EnumSet.of(AccessMask.GENERIC_READ),
-                null,
-                SMB2ShareAccess.ALL,
-                SMB2CreateDisposition.FILE_OPEN,
-                null,
-            )
-            val size = file.fileInformation.standardInformation.endOfFile
-            return SmbReadHandle(q.client, q.connection, q.session, q.share, file, size)
+        val path = parsed.path.replace('/', '\\')
+        fun openFile(share: DiskShare) = share.openFile(
+            path, EnumSet.of(AccessMask.GENERIC_READ), null,
+            SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null,
+        )
+        val file = try {
+            openFile(readShare(cfg))
         } catch (t: Throwable) {
-            runCatching { q.share.close() }
-            runCatching { q.session.close() }
-            runCatching { q.connection.close() }
-            runCatching { q.client.close() }
-            throw t
+            // Cached session went stale (NAS dropped it) — reconnect once and retry.
+            releaseReadCache()
+            openFile(readShare(cfg))
         }
+        val size = file.fileInformation.standardInformation.endOfFile
+        // Remember the file so the keep-alive can stat it between reads.
+        synchronized(readLock) { readConn?.probePath = path }
+        return SmbReadHandle(file, size)
     }
 
     /** Delete a recording from the NAS. */

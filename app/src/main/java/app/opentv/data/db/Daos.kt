@@ -14,6 +14,8 @@ import androidx.room.Update
 import androidx.room.Upsert
 import app.opentv.data.model.Category
 import app.opentv.data.model.Channel
+import app.opentv.data.model.Download
+import app.opentv.data.model.DownloadStatus
 import app.opentv.data.model.EpgChannelAlias
 import app.opentv.data.model.EpgFeed
 import app.opentv.data.model.Episode
@@ -793,4 +795,43 @@ interface ReminderDao {
     /** Housekeeping: drop reminders whose programme has already ended. */
     @Query("DELETE FROM reminders WHERE endUtcMillis < :beforeMillis")
     suspend fun deleteEndedBefore(beforeMillis: Long)
+}
+
+@Dao
+interface DownloadDao {
+    /** All downloads, newest first — the Downloads library reads this. */
+    @Query("SELECT * FROM downloads ORDER BY createdAtMillis DESC")
+    fun observeAll(): Flow<List<Download>>
+
+    @Query("SELECT * FROM downloads WHERE id = :id")
+    suspend fun byId(id: Long): Download?
+
+    /** De-dup / state lookup for a movie or episode. */
+    @Query("SELECT * FROM downloads WHERE mediaKey = :mediaKey LIMIT 1")
+    suspend fun byMediaKey(mediaKey: String): Download?
+
+    /** The detail screen watches this so its Download button reflects live state. */
+    @Query("SELECT * FROM downloads WHERE mediaKey = :mediaKey LIMIT 1")
+    fun observeByMediaKey(mediaKey: String): Flow<Download?>
+
+    @Insert
+    suspend fun insert(download: Download): Long
+
+    @Query("UPDATE downloads SET status = :status WHERE id = :id")
+    suspend fun setStatus(id: Long, status: DownloadStatus)
+
+    @Query("UPDATE downloads SET downloadedBytes = :downloaded, totalBytes = :total WHERE id = :id")
+    suspend fun setProgress(id: Long, downloaded: Long, total: Long)
+
+    @Query("UPDATE downloads SET filePath = :path WHERE id = :id")
+    suspend fun setFilePath(id: Long, path: String)
+
+    @Query("UPDATE downloads SET posterPath = :path WHERE id = :id")
+    suspend fun setPosterPath(id: Long, path: String)
+
+    @Query("UPDATE downloads SET status = :status, error = :error WHERE id = :id")
+    suspend fun setFailed(id: Long, status: DownloadStatus, error: String?)
+
+    @Query("DELETE FROM downloads WHERE id = :id")
+    suspend fun delete(id: Long)
 }

@@ -22,6 +22,16 @@ import app.opentv.data.parser.ChannelNameNormalizer
  * is **unambiguous** — exactly one guide channel fits. `bbcone` will claim `BBC One` when
  * that is the only candidate, but if the guide carries `BBC One London` *and* `BBC One
  * Wales` and nothing plain, we refuse to guess between regions.
+ *
+ * ## Why the index is sorted
+ *
+ * A big provider ships 20k+ channels and only a few hundred get an exact hit; the rest fall
+ * through to the prefix tier. Scanning every guide alias for each of those — O(channels ×
+ * aliases) — is hundreds of millions of comparisons on a TV box, which pins a core for minutes
+ * and reads as a frozen "loading". So the keys are sorted once and the two prefix relations are
+ * answered without a full scan: "a guide key extends the provider key" is a contiguous range
+ * found by binary search; "the provider key extends a guide key" is at most `key.length` exact
+ * lookups (one per prefix). Per channel that is ~O(log A + matches) instead of O(A).
  */
 object EpgMatcher {
 
@@ -34,7 +44,10 @@ object EpgMatcher {
 
     class Index internal constructor(
         private val exact: Map<String, String>,
-        private val sortedKeys: List<Alias>,
+        /** Distinct normalised keys, sorted ascending, for binary-searched prefix ranges. */
+        private val sortedKeys: List<String>,
+        /** Every epg id seen for a given key (usually one; more than one is the ambiguous case). */
+        private val byKey: Map<String, Set<String>>,
     ) {
         /** Returns the epg id for a provider channel's group key, or null. */
         fun match(groupKey: String): String? {
@@ -44,19 +57,49 @@ object EpgMatcher {
 
             // Prefix tier: the provider name extends the guide name or vice versa
             // ("skysportsmainevent" vs "skysportsmainevt"; "bbcone" vs "bbconelondon").
-            // Only accepted when every candidate agrees on a single epg id.
+            // Accepted only when every candidate agrees on a single epg id. Collecting the two
+            // relations below and demanding a single distinct epg id reproduces the old full-scan
+            // result exactly — just without visiting every alias.
             var found: String? = null
-            for (alias in sortedKeys) {
-                val hit = (alias.key.length >= MIN_KEY_LENGTH) &&
-                    (alias.key.startsWith(groupKey) || groupKey.startsWith(alias.key))
-                if (!hit) continue
+
+            // `false` means "two different epg ids seen" — the caller must give up (ambiguous).
+            fun consider(epgId: String): Boolean {
                 if (found == null) {
-                    found = alias.epgId
-                } else if (found != alias.epgId) {
-                    return null // ambiguous — refuse to guess
+                    found = epgId
+                    return true
                 }
+                return found == epgId
             }
+
+            // Relation 1: a guide key *is a prefix of* the provider key (groupKey startsWith key).
+            // There are at most groupKey.length such prefixes; test each against the exact key set.
+            for (len in MIN_KEY_LENGTH..groupKey.length) {
+                val ids = byKey[groupKey.substring(0, len)] ?: continue
+                for (id in ids) if (!consider(id)) return null
+            }
+
+            // Relation 2: a guide key *extends* the provider key (key startsWith groupKey). Sorted
+            // keys with that prefix are contiguous, so walk from the first key >= groupKey while it
+            // still starts with groupKey.
+            var i = lowerBound(sortedKeys, groupKey)
+            while (i < sortedKeys.size && sortedKeys[i].startsWith(groupKey)) {
+                val ids = byKey[sortedKeys[i]]
+                if (ids != null) for (id in ids) if (!consider(id)) return null
+                i++
+            }
+
             return found
+        }
+
+        /** First index whose key is >= [key] (standard lower-bound binary search). */
+        private fun lowerBound(keys: List<String>, key: String): Int {
+            var lo = 0
+            var hi = keys.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (keys[mid] < key) lo = mid + 1 else hi = mid
+            }
+            return lo
         }
     }
 
@@ -70,7 +113,7 @@ object EpgMatcher {
     fun buildIndex(aliases: Iterable<Pair<String, String>>): Index {
         val exact = HashMap<String, String>()
         val ambiguous = HashSet<String>()
-        val all = ArrayList<Alias>()
+        val byKey = HashMap<String, MutableSet<String>>()
 
         for ((epgId, name) in aliases) {
             for (candidate in listOf(name, epgId)) {
@@ -79,7 +122,7 @@ object EpgMatcher {
                 // provider's 'BBC ONE EAST'. normalize() strips the quality token.
                 val key = ChannelNameNormalizer.normalize(candidate).groupKey
                 if (key.length < MIN_KEY_LENGTH) continue
-                all += Alias(epgId, key)
+                byKey.getOrPut(key) { HashSet() }.add(epgId)
                 val existing = exact.putIfAbsent(key, epgId)
                 if (existing != null && existing != epgId) {
                     // Two different guide channels normalise to the same key. Neither can
@@ -90,7 +133,7 @@ object EpgMatcher {
         }
         ambiguous.forEach(exact::remove)
 
-        return Index(exact, all)
+        return Index(exact, byKey.keys.sorted(), byKey)
     }
 
     /**

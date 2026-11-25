@@ -86,6 +86,27 @@ class EpgRepository(
     suspend fun upcoming(epgChannelId: String, nowUtcMillis: Long, limit: Int = 12): List<Programme> =
         programmeDao.upcoming(epgChannelId, nowUtcMillis, limit)
 
+    /**
+     * What's on now and what's on next for one channel, resolved across its guide-id candidates.
+     *
+     * Takes the whole candidate list ([app.opentv.data.model.Channel.epgCandidates], and the same
+     * for every quality variant) rather than a single id, and uses the first that actually returns
+     * programmes. A provider-supplied id pointing at a guide the provider never ships must not
+     * shadow a working name match — the guide grid resolves it this way too, and the player has to
+     * agree with the guide or the same channel shows different programmes in each.
+     */
+    suspend fun nowNext(epgIds: List<String>, nowUtcMillis: Long): Pair<Programme?, Programme?> {
+        for (id in epgIds) {
+            // Four rows is enough for now + next even when a channel carries short back-to-back
+            // programmes, and keeps this cheap enough to run on every zap.
+            val list = upcoming(id, nowUtcMillis, limit = 4)
+            if (list.isEmpty()) continue
+            return list.firstOrNull { it.isLiveAt(nowUtcMillis) } to
+                list.firstOrNull { it.startUtcMillis > nowUtcMillis }
+        }
+        return null to null
+    }
+
     // ---- Feed management -------------------------------------------------------------------
 
     suspend fun addCustomFeed(name: String, url: String) {

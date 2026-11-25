@@ -150,6 +150,12 @@ fun VodPlayerScreen(
     val tracks by controller.tracks.collectAsState()
 
     var paused by remember { mutableStateOf(false) }
+    // Resume prompt: if there's a saved position, ask "continue or start over" before playing rather
+    // than silently resuming. Playback is held until the viewer chooses.
+    var showResume by remember { mutableStateOf(false) }
+    var resumeMs by remember { mutableLongStateOf(0L) }
+    var started by remember { mutableStateOf(false) }
+    val resumeFocus = remember { FocusRequester() }
     var vodPanel by remember { mutableStateOf(VodPanel.NONE) }
     val panelFocus = remember { FocusRequester() }
     var positionMs by remember { mutableLongStateOf(0L) }
@@ -196,22 +202,47 @@ fun VodPlayerScreen(
         }
     }
 
-    LaunchedEffect(mediaKey) {
-        val resumeFrom = graph.playbackPositions.get(settings.activeProfileId.value, mediaKey)
-            ?.takeIf { !it.isFinished }?.positionMillis ?: 0L
+    fun begin(fromMillis: Long) {
         controller.play(
             PlayerController.Request(
                 url = streamUrl,
                 title = title,
                 userAgent = userAgent,
-                startPositionMillis = resumeFrom,
+                startPositionMillis = fromMillis,
                 isLive = false,
             ),
             debounce = false,
         )
+        started = true
+    }
+
+    // Decide how to start: a live recording never resumes; otherwise, if there's a meaningful saved
+    // position, show the resume prompt and wait for the choice. No saved position → just play.
+    LaunchedEffect(mediaKey) {
+        val saved = graph.playbackPositions.get(settings.activeProfileId.value, mediaKey)
+            ?.takeIf { !it.isFinished }?.positionMillis ?: 0L
+        if (!growingRec && saved > RESUME_MIN_MILLIS) {
+            resumeMs = saved
+            showResume = true
+        } else {
+            begin(0L)
+        }
+    }
+
+    // Periodic position save, only once playback has actually started.
+    LaunchedEffect(started) {
+        if (!started) return@LaunchedEffect
         while (isActive) {
             delay(15_000)
             savePosition()
+        }
+    }
+
+    // Put focus on the resume prompt's default action when it appears.
+    LaunchedEffect(showResume) {
+        if (showResume) {
+            delay(60)
+            runCatching { resumeFocus.requestFocus() }
         }
     }
 
@@ -251,7 +282,8 @@ fun VodPlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, vodPanel) {
+    LaunchedEffect(controlsVisible, vodPanel, showResume) {
+        if (showResume) return@LaunchedEffect
         if (controlsVisible) {
             delay(40)
             runCatching { if (vodPanel != VodPanel.NONE) panelFocus.requestFocus() else barFocus.requestFocus() }
@@ -264,6 +296,7 @@ fun VodPlayerScreen(
         val activelyPlaying = state is PlayerController.State.Playing ||
             (growingRec && state is PlayerController.State.Buffering)
         when {
+            showResume -> onBack()
             vodPanel != VodPanel.NONE -> vodPanel = VodPanel.NONE
             controlsVisible && activelyPlaying && !paused -> controlsVisible = false
             else -> onBack()
@@ -335,7 +368,7 @@ fun VodPlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible && !showResume,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -436,6 +469,89 @@ fun VodPlayerScreen(
                 }
             }
         }
+
+        // Resume-or-restart prompt, drawn on top of everything until the viewer chooses.
+        if (showResume) {
+            ResumePrompt(
+                title = title,
+                positionMs = resumeMs,
+                firstFocus = resumeFocus,
+                onResume = { showResume = false; begin(resumeMs) },
+                onStartOver = { showResume = false; begin(0L) },
+            )
+        }
+    }
+}
+
+/** "You were watching — resume or start over?" shown when a film has a saved position. */
+@Composable
+private fun ResumePrompt(
+    title: String,
+    positionMs: Long,
+    firstFocus: FocusRequester,
+    onResume: () -> Unit,
+    onStartOver: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(48.dp).widthIn(max = 620.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.vod_resume_at, formatDuration(positionMs)),
+                color = Color.White.copy(alpha = 0.8f),
+            )
+            Spacer(Modifier.height(28.dp))
+            Row {
+                ResumeButton(
+                    label = stringResource(R.string.vod_resume),
+                    primary = true,
+                    focusRequester = firstFocus,
+                    onClick = onResume,
+                )
+                Spacer(Modifier.width(16.dp))
+                ResumeButton(
+                    label = stringResource(R.string.vod_start_over),
+                    primary = false,
+                    focusRequester = null,
+                    onClick = onStartOver,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResumeButton(
+    label: String,
+    primary: Boolean,
+    focusRequester: FocusRequester?,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val base = if (primary) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.14f)
+    val container = if (focused) MaterialTheme.colorScheme.primary else base
+    val content = if (focused || primary) MaterialTheme.colorScheme.onPrimary else Color.White
+    Row(
+        modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(12.dp))
+            .background(container)
+            .then(
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(12.dp))
+                else Modifier,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium, color = content)
     }
 }
 
@@ -550,6 +666,9 @@ private fun vodTrackLabel(label: String?, language: String?, index: Int): String
     }
     return "Track ${index + 1}"
 }
+
+/** Below this, a saved position isn't worth a prompt — just start from the top. */
+private const val RESUME_MIN_MILLIS = 15_000L
 
 private fun formatDuration(ms: Long): String {
     if (ms <= 0) return "0:00"

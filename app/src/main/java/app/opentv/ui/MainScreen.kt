@@ -14,20 +14,28 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
@@ -66,7 +74,7 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Recording
 import app.opentv.data.model.Series
 import app.opentv.ui.channels.HomeScreen
-import app.opentv.ui.recordings.RecordingsScreen
+import app.opentv.ui.downloads.LibraryScreen
 import app.opentv.ui.vod.MoviesScreen
 import app.opentv.ui.vod.SeriesScreen
 
@@ -80,7 +88,7 @@ enum class Tab(val labelRes: Int, val icon: ImageVector) {
     LIVE(R.string.nav_live_tv, Icons.Filled.LiveTv),
     MOVIES(R.string.nav_movies, Icons.Filled.Movie),
     SHOWS(R.string.nav_shows, Icons.Filled.Tv),
-    RECORDINGS(R.string.nav_recordings, Icons.Filled.FiberManualRecord),
+    LIBRARY(R.string.nav_library, Icons.Filled.VideoLibrary),
 }
 
 private val RAIL_COLLAPSED = 76.dp
@@ -101,6 +109,7 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onOpenProfiles: () -> Unit,
     onPlayRecording: (Recording) -> Unit,
+    onPlayDownload: (mediaKey: String, url: String, title: String) -> Unit,
     onPlayCatchup: (mediaKey: String, url: String, title: String, ua: String) -> Unit,
     activeProfileName: String,
 ) {
@@ -117,7 +126,7 @@ fun MainScreen(
             if (liveEnabled) add(Tab.LIVE)
             if (moviesEnabled) add(Tab.MOVIES)
             if (seriesEnabled) add(Tab.SHOWS)
-            add(Tab.RECORDINGS)
+            add(Tab.LIBRARY)
         }
     }
     // The default/home tab is the first visible one — Live TV normally, otherwise the first type
@@ -196,7 +205,7 @@ fun MainScreen(
                     hasSources = hasSources,
                     isSyncing = isSyncing,
                 )
-                Tab.RECORDINGS -> RecordingsScreen(onPlay = onPlayRecording)
+                Tab.LIBRARY -> LibraryScreen(onPlay = onPlayDownload, onPlayRecording = onPlayRecording)
             }
         }
       }
@@ -270,6 +279,7 @@ private fun NavRail(
         targetValue = if (expanded) RAIL_EXPANDED else RAIL_COLLAPSED,
         label = "railWidth",
     )
+    val railScroll = rememberScrollState()
 
     Column(
         modifier
@@ -278,7 +288,15 @@ private fun NavRail(
             .background(MaterialTheme.colorScheme.surface)
             .focusGroup()
             .onFocusChanged { expanded = it.hasFocus }
-            .padding(vertical = 16.dp),
+            // Keep the rail clear of the screen edges. The system-bar inset covers phones/tablets;
+            // the larger bottom margin covers TV overscan, which the system reports nothing for.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical))
+            .padding(top = 16.dp, bottom = 32.dp)
+            // The rail scrolls: with the Library tab added, a short screen, a large system font or
+            // TV overscan can push the list past the bottom, and a plain Column just clips whatever
+            // overflows — which is exactly how the bottom-pinned Settings item went missing. Scrolling
+            // means focusing Settings (d-pad down) always brings it into view.
+            .verticalScroll(railScroll),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // Brand: the logo mark alone when collapsed, the mark + "OpenTV" wordmark when open. The
@@ -310,8 +328,9 @@ private fun NavRail(
             RailItem(t.icon, stringResource(t.labelRes), expanded, current == t) { onSelect(t) }
         }
 
-        Spacer(Modifier.height(1.dp).fillMaxWidth())
-        Spacer(Modifier.weight(1f))
+        // A gap before the utility items. Not weight(1f) — weight can't be measured inside a
+        // vertical scroll, and it was the mechanism that let Settings overflow off-screen.
+        Spacer(Modifier.height(24.dp))
 
         RailItem(Icons.Filled.Search, stringResource(R.string.nav_search), expanded, false, onOpenSearch)
         RailItem(Icons.Filled.Person, activeProfileName, expanded, false, onOpenProfiles)
