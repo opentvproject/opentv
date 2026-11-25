@@ -84,6 +84,12 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
+    /**
+     * When set, everything this player does is observed and written down for the playback
+     * diagnostics (stalls, provider drops, arrival rate). Purely a listener: it changes nothing
+     * about how streams are played. Only the main live player sets it.
+     */
+    private val diagnostics: app.opentv.diagnostics.StreamHealthRecorder? = null,
 ) {
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
@@ -104,6 +110,10 @@ class PlayerController(
         /** Live streams are never resumed; VOD is. */
         val startPositionMillis: Long = 0L,
         val isLive: Boolean = true,
+        /** Which catalogue channel this is, for the playback diagnostics. 0 when it is not one. */
+        val channelId: Long = 0,
+        val sourceId: Long = 0,
+        val groupKey: String = "",
     )
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -127,6 +137,7 @@ class PlayerController(
      */
     private val httpFactory = OkHttpDataSource.Factory(httpClient).apply {
         setDefaultRequestProperties(mapOf("User-Agent" to DEFAULT_USER_AGENT))
+        if (diagnostics != null) setTransferListener(diagnostics)
     }
 
     private val dataSourceFactory: androidx.media3.datasource.DataSource.Factory =
@@ -246,12 +257,16 @@ class PlayerController(
                     if (consecutiveFailures < MAX_AUTO_RESTARTS && request != null) {
                         scope.launch {
                             delay(AUTO_RESTART_DELAY_MILLIS)
-                            if (current == request) play(request, debounce = false)
+                            if (current == request) play(request, debounce = false, restart = true)
                         }
                     }
                 }
             })
         }
+
+    init {
+        diagnostics?.attach(player)
+    }
 
     /**
      * Switches playback.
@@ -259,17 +274,20 @@ class PlayerController(
      * @param debounce when true (the default for channel surfing) the switch waits briefly so
      * that rapid presses collapse into a single tune. Pass false for a deliberate selection.
      */
-    fun play(request: Request, debounce: Boolean = true) {
+    fun play(request: Request, debounce: Boolean = true) = play(request, debounce, restart = false)
+
+    /** @param restart true only for the silent recovery after an error: same viewing, new connection. */
+    private fun play(request: Request, debounce: Boolean, restart: Boolean) {
         // Cancelling here is what makes fast channel-changing safe: the previous switch never
         // reaches the player, so we never stack prepares.
         switchJob?.cancel()
         current = request
+        app.opentv.diagnostics.PlaybackBusy.set(this, true)
 
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
-
-            android.util.Log.d("PlayReq", "url='${request.url}' isLive=${request.isLive} title='${request.title}'")
             consecutiveFailures = 0
+            diagnostics?.onPlayRequested(request, restart)
             httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
             _state.value = State.Buffering(request.title)
 
@@ -363,6 +381,8 @@ class PlayerController(
     fun stop() {
         switchJob?.cancel()
         current = null
+        app.opentv.diagnostics.PlaybackBusy.set(this, false)
+        diagnostics?.onStopped()
         player.stop()
         player.clearMediaItems()
         _state.value = State.Idle
@@ -370,6 +390,8 @@ class PlayerController(
 
     fun release() {
         switchJob?.cancel()
+        app.opentv.diagnostics.PlaybackBusy.set(this, false)
+        diagnostics?.onStopped()
         player.release()
         // Drop the shared NAS playback connection when the player goes away.
         runCatching { app.opentv.recording.SmbClient.releaseReadCache() }

@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **Playback diagnostics: find out why it buffers, and get moved to a stream that doesn't.**
+  Every channel you watch is now measured in the background — how long it took to start, how often
+  it buffered, how often the provider dropped the connection, whether the picture jumped back and
+  replayed, whether the stream arrived with pieces missing. **Settings → Playback diagnostics**
+  turns that into plain answers: a neutral internet speed test, a response test of each provider's
+  server, a per-provider scorecard, and a verdict that says whose side the problem is on ("your
+  internet is fine — this provider is not keeping up"). **Test every copy** downloads a few
+  seconds of each copy of a channel across all your providers and ranks them. A **VPN
+  comparison** puts the same measurements side by side with your VPN off and on, so you can see
+  whether your ISP is throttling the provider (OpenTV does not include a VPN; it measures yours).
+  In the player, a **Stats** button shows the live numbers, and when a stream keeps buffering
+  OpenTV offers — or, if you turn it on, automatically switches to — the copy of that channel
+  with the best record on this device. Everything stays on the device; nothing is uploaded.
+- **Optimise streams: open the copy of each channel that actually plays.** Providers carry the
+  same channel several times (4K, FHD, HD, SD), often on servers of very different strength.
+  **Settings → Playback diagnostics → Optimise streams** tests each copy for a few seconds —
+  your favourites, the categories you choose, or everything — and from then on a channel opens on
+  the best quality that keeps up, passing over copies that buffer or do not open. It tests one
+  stream at a time and pauses whenever you watch or record, so it can also **run every night at
+  3 am**. The screen lists every channel that now opens differently and why; **Use the results**
+  turns it all off again. What you watch feeds the same record, and the buffering rescue uses it
+  to pick a copy that has been measured rather than guessed at.
+- **Fix my streams: one button, one answer.** At the top of Playback diagnostics, one press tests
+  your internet, each provider's server and every copy of the channels you watch most, moves each
+  of those channels onto the copy that plays best, and finishes with a single sentence saying what
+  it found and whose side any problem is on.
+- **A score out of 100 beside every channel that has been tested or watched.** It is how much
+  faster the stream arrives here than it needs to: 80 and over (green) plays with room to spare,
+  50–79 (amber) may buffer, under 50 (red) struggles. No score means the channel has not been
+  measured yet. Each copy in Playback diagnostics carries the same score.
+- **Buffering rescue is now on by default, and you can undo it.** When a channel keeps buffering
+  OpenTV moves you to a steadier copy on its own and says so; press OK within ten seconds to go
+  straight back. Turn it off under *When a stream struggles* to be asked first instead.
+- **OpenTV learns when a copy is weak.** Measurements are now also kept by time of day (morning,
+  afternoon, evening, night), so a copy that is fine at lunchtime but falls over on a busy
+  evening is passed over in the evening and still used at lunchtime.
+- **Weekly provider report card.** Each provider gets a letter, A to E, for the week's actual
+  viewing — buffering per hour, how fast channels start, dropped connections — next to how it did
+  the week before.
+- **Test every copy of any channel, not just the last one you watched.** The copy test now starts
+  on the channel you watch most, and **Choose a different channel** searches for any other by
+  name. The copy marked **Best** is the highest quality that arrives with room to spare; it used
+  to be whichever had the most headroom, which was always the SD one.
+- **The speed test now shows what your connection can play.** Under the result is a bar for SD,
+  HD, Full HD and 4K: a full green bar means that quality should stream perfectly, amber means it
+  fits but may buffer when the connection is shared, red means too slow. The bars climb live
+  while the test runs.
+- The speed test's response time and jitter are now measured as plain network round trips. They
+  used to include the test server's own thinking time, which made a good connection look
+  "unsteady".
+- The stats overlay no longer says "Unsteady" for the second or two a channel takes to start; it
+  says "Starting…" until there is a picture to judge.
 - **A channel banner when you zap, and full programme detail on Info.** Changing channel now
   flashes a compact banner — channel number, logo, name, what's on with its times and a progress
   bar, and what's next. It appears the instant you press the key, before the picture loads and

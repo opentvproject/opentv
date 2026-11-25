@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
@@ -34,6 +35,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,14 +51,23 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.opentv.R
+import app.opentv.core.ServiceLocator
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
+import app.opentv.diagnostics.DiagnosticsRepository
+import app.opentv.diagnostics.StreamStrength
+import app.opentv.diagnostics.StrengthGrade
+import app.opentv.diagnostics.score
 import app.opentv.ui.ChannelsViewModel
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
@@ -93,6 +105,7 @@ fun GuideGrid(
 ) {
     val scroll = rememberScrollState()
     val now = System.currentTimeMillis()
+    val strength by rememberStrength()
     // Jumping to another day resets the horizontal scroll to that day's start; a within-day time
     // drift (dayOffset unchanged) leaves the user's scroll position untouched.
     androidx.compose.runtime.LaunchedEffect(dayOffset) { scroll.scrollTo(0) }
@@ -113,6 +126,7 @@ fun GuideGrid(
                     nowMillis = now,
                     scroll = scroll,
                     isSelected = row.key == selectedKey,
+                    strength = strength(row.primary, row.variants),
                     onSelect = { onSelectRow(row) },
                     onFocus = { onFocusRow(row) },
                     onProgramme = { programme -> onProgramme(row, programme) },
@@ -142,6 +156,7 @@ fun ChannelList(
     modifier: Modifier = Modifier,
 ) {
     val now = System.currentTimeMillis()
+    val strength by rememberStrength()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
@@ -152,6 +167,7 @@ fun ChannelList(
                 row = row,
                 nowMillis = now,
                 isSelected = row.key == selectedKey,
+                strength = strength(row.primary, row.variants),
                 onSelect = { onSelectRow(row) },
                 onFocus = { onFocusRow(row) },
                 onToggleFavourite = { onToggleFavourite(row) },
@@ -161,11 +177,69 @@ fun ChannelList(
     }
 }
 
+/** Every copy's measured strength by channel id; empty until something has been tested or watched. */
+@Composable
+private fun rememberStrength(): State<(Channel, List<Channel>) -> StreamStrength?> {
+    val context = LocalContext.current
+    val repo = remember { ServiceLocator.get(context).diagnostics }
+    val measured by repo.current.collectAsState()
+    val picks by repo.picks.collectAsState()
+    // The score is for the copy the row will actually open, which is not always its first.
+    return remember(measured, picks) {
+        mutableStateOf({ primary: Channel, variants: List<Channel> ->
+            val opens = if (picks.isEmpty()) primary else DiagnosticsRepository.preferredAmong(primary, variants, picks)
+            measured[opens.id]
+        })
+    }
+}
+
+/**
+ * How well the copy this row opens has been arriving on this device, as a mark out of 100:
+ * green plays with room to spare, amber only just keeps up, red cannot. A copy that has played
+ * but whose bitrate is unknown gets a plain dot. Nothing at all for a channel never measured —
+ * no mark means "not known", never "fine".
+ */
+@Composable
+private fun StrengthMark(strength: StreamStrength?) {
+    val grade = strength?.grade ?: return
+    val score = strength.score
+    val (color, label) = when (grade) {
+        StrengthGrade.STRONG, StrengthGrade.PLAYS -> Color(0xFF43A047) to R.string.guide_strength_good
+        StrengthGrade.BORDERLINE -> Color(0xFFFFB300) to R.string.guide_strength_fair
+        StrengthGrade.TOO_SLOW, StrengthGrade.DEAD -> Color(0xFFE53935) to R.string.guide_strength_poor
+    }
+    val description = stringResource(label)
+    Spacer(Modifier.width(6.dp))
+    if (score != null) {
+        Text(
+            score.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.Black,
+            maxLines = 1,
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(color)
+                .padding(horizontal = 5.dp)
+                .semantics { contentDescription = "$description, $score" },
+        )
+        return
+    }
+    Box(
+        Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color)
+            .semantics { contentDescription = description },
+    )
+}
+
 @Composable
 private fun ChannelListRow(
     row: ChannelsViewModel.Row,
     nowMillis: Long,
     isSelected: Boolean,
+    strength: StreamStrength?,
     onSelect: () -> Unit,
     onFocus: () -> Unit,
     onToggleFavourite: () -> Unit,
@@ -220,6 +294,7 @@ private fun ChannelListRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                StrengthMark(strength)
                 if (row.variants.size > 1) {
                     Spacer(Modifier.width(8.dp))
                     Text(
@@ -315,6 +390,7 @@ private fun GuideRow(
     nowMillis: Long,
     scroll: androidx.compose.foundation.ScrollState,
     isSelected: Boolean,
+    strength: StreamStrength? = null,
     onSelect: () -> Unit,
     onFocus: () -> Unit,
     onProgramme: (Programme) -> Unit,
@@ -373,12 +449,16 @@ private fun GuideRow(
             )
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    row.primary.shownName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        row.primary.shownName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    StrengthMark(strength)
+                }
                 if (row.variants.size > 1) {
                     Text(
                         stringResource(R.string.guide_qualities_count, row.variants.size),

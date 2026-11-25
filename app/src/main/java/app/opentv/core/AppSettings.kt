@@ -48,6 +48,68 @@ class AppSettings private constructor(context: Context) {
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
 
+    /** The live stream-health readout over the picture. Off until asked for. */
+    private val _statsOverlayEnabled = MutableStateFlow(prefs.getBoolean(KEY_STATS_OVERLAY, false))
+    val statsOverlayEnabled: StateFlow<Boolean> = _statsOverlayEnabled.asStateFlow()
+
+    /**
+     * When a stream keeps buffering, move to a better copy of the same channel without asking.
+     * On by default: a picture that keeps freezing is worse than one that changes copy, the switch
+     * is announced on screen, and one press of OK undoes it. Off, the app offers the switch and
+     * the viewer decides.
+     */
+    private val _autoSwitchOnBuffering = MutableStateFlow(prefs.getBoolean(KEY_AUTO_SWITCH, true))
+    val autoSwitchOnBuffering: StateFlow<Boolean> = _autoSwitchOnBuffering.asStateFlow()
+
+    /**
+     * Whether the measurements from "Optimise streams" decide which copy of a channel opens. On by
+     * default because it changes nothing until there are measurements; switching it off is the undo.
+     */
+    private val _useOptimisedCopies = MutableStateFlow(prefs.getBoolean(KEY_USE_OPTIMISED, true))
+    val useOptimisedCopies: StateFlow<Boolean> = _useOptimisedCopies.asStateFlow()
+
+    fun setUseOptimisedCopies(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_USE_OPTIMISED, enabled).apply()
+        _useOptimisedCopies.value = enabled
+    }
+
+    /** `favourites`, `categories` or `all`: which channels an optimise run tests. */
+    private val _optimiseScope = MutableStateFlow(prefs.getString(KEY_OPTIMISE_SCOPE, null) ?: "favourites")
+    val optimiseScope: StateFlow<String> = _optimiseScope.asStateFlow()
+
+    fun setOptimiseScope(scope: String) {
+        prefs.edit().putString(KEY_OPTIMISE_SCOPE, scope).apply()
+        _optimiseScope.value = scope
+    }
+
+    /** Category ids chosen for the `categories` scope. */
+    private val _optimiseCategories =
+        MutableStateFlow(prefs.getStringSet(KEY_OPTIMISE_CATS, emptySet())!!.toSet())
+    val optimiseCategories: StateFlow<Set<String>> = _optimiseCategories.asStateFlow()
+
+    fun setOptimiseCategories(ids: Set<String>) {
+        prefs.edit().putStringSet(KEY_OPTIMISE_CATS, ids).apply()
+        _optimiseCategories.value = ids.toSet()
+    }
+
+    private val _optimiseNightly = MutableStateFlow(prefs.getBoolean(KEY_OPTIMISE_NIGHTLY, false))
+    val optimiseNightly: StateFlow<Boolean> = _optimiseNightly.asStateFlow()
+
+    fun setOptimiseNightly(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_OPTIMISE_NIGHTLY, enabled).apply()
+        _optimiseNightly.value = enabled
+    }
+
+    fun setStatsOverlayEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_STATS_OVERLAY, enabled).apply()
+        _statsOverlayEnabled.value = enabled
+    }
+
+    fun setAutoSwitchOnBuffering(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_SWITCH, enabled).apply()
+        _autoSwitchOnBuffering.value = enabled
+    }
+
     /** Whether the selected channel plays live inside the guide's preview pane. */
     private val _guidePreviewVideo = MutableStateFlow(prefs.getBoolean(KEY_PREVIEW_VIDEO, true))
     val guidePreviewVideo: StateFlow<Boolean> = _guidePreviewVideo.asStateFlow()
@@ -424,6 +486,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
         private const val KEY_SUBTITLES = "subtitles_enabled"
+        private const val KEY_STATS_OVERLAY = "stats_overlay_enabled"
+        private const val KEY_AUTO_SWITCH = "auto_switch_on_buffering"
+        private const val KEY_USE_OPTIMISED = "use_optimised_copies"
+        private const val KEY_OPTIMISE_SCOPE = "optimise_scope"
+        private const val KEY_OPTIMISE_CATS = "optimise_categories"
+        private const val KEY_OPTIMISE_NIGHTLY = "optimise_nightly"
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
