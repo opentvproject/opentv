@@ -131,6 +131,34 @@ object ServiceLocator {
             DownloadRepository(database.downloads())
         }
 
+        /** Playback diagnostics: what streams actually did on this device, and the tests around it. */
+        val diagnostics: app.opentv.diagnostics.DiagnosticsRepository by lazy {
+            app.opentv.diagnostics.DiagnosticsRepository(
+                context = appContext,
+                database = app.opentv.diagnostics.DiagnosticsDatabase.build(appContext),
+                channelDao = database.channels(),
+                sources = sourceRepository,
+                catalog = catalogRepository,
+                settings = settings,
+                httpClient = streamingHttpClient,
+            )
+        }
+
+        /** Tests copies of channels in the background so the app can open the one that plays best. */
+        val optimizer: app.opentv.diagnostics.StreamOptimizer by lazy {
+            app.opentv.diagnostics.StreamOptimizer(
+                context = appContext,
+                repo = diagnostics,
+                channelDao = database.channels(),
+                sources = sourceRepository,
+                settings = settings,
+                busy = kotlinx.coroutines.flow.combine(
+                    app.opentv.diagnostics.PlaybackBusy.active,
+                    recordingRepository.observeActive(),
+                ) { playing, recordings -> playing || recordings.isNotEmpty() },
+            )
+        }
+
         val recordingEngine: RecordingEngine by lazy {
             RecordingEngine(
                 appContext, recordingRepository, sourceRepository, settings,

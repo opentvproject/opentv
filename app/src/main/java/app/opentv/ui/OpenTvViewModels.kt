@@ -435,12 +435,21 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
 
         val total = groups.size.coerceAtLeast(1)
         var built = 0
+        // A snapshot, deliberately: a row is rebuilt when the channel list changes, not every time
+        // a test finishes. The player asks again at the moment of tuning, so a stale row still
+        // opens the right copy.
+        val picks = graph.diagnostics.picks.value
         return groups.values.map { group ->
-            group.sortByDescending { it.qualityRank }
+            // Best quality first; among equals, the copy that tested strongest.
+            group.sortWith(
+                compareByDescending<Channel> { it.qualityRank }
+                    .thenByDescending { app.opentv.diagnostics.CopyPicker.sortWeight(picks[it.id]) },
+            )
             // Only genuinely different qualities are switchable; identical-quality dupes
             // (same stream in two categories) collapse to one, so no false "2 qualities".
             val variants = distinctByQuality(group)
-            val primary = variants.first()
+            val primary = if (picks.isEmpty()) variants.first()
+            else app.opentv.diagnostics.DiagnosticsRepository.preferredAmong(variants.first(), variants, picks)
 
             // Walk every variant's guide-id candidates (override → provider → matched)
             // and use the first that actually has programmes. An id that never lights up

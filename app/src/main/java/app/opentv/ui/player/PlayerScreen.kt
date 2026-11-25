@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -105,6 +107,8 @@ import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
+import app.opentv.diagnostics.StreamHealthRecorder
+import app.opentv.diagnostics.StreamSuggestion
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
 import app.opentv.ui.RecordingBackgroundDialog
@@ -142,14 +146,22 @@ fun PlayerScreen(
     val settings = remember { graph.settings }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val subtitlesDefault by settings.subtitlesEnabled.collectAsState()
+    // Watches what this player does and keeps the record the diagnostics are built from.
+    val recorder = remember {
+        StreamHealthRecorder(context.applicationContext, scope, onSessionFinished = graph.diagnostics::record)
+    }
     val controller = remember {
         PlayerController(
             context, scope, graph.streamingHttpClient,
             subtitlesEnabled = settings.subtitlesEnabled.value,
             // Opt-in shallow DVR so the transport's pause/rewind actually holds on a live stream.
             dvr = settings.livePauseEnabled.value,
+            diagnostics = recorder,
         )
     }
+    val liveStats by recorder.live.collectAsState()
+    val statsOverlay by settings.statsOverlayEnabled.collectAsState()
+    val autoSwitch by settings.autoSwitchOnBuffering.collectAsState()
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
     // What's recording right now, so the Record button can show as armed for this channel.
@@ -173,6 +185,19 @@ fun PlayerScreen(
 
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
+    // The row of the browsing list that is playing. Differs from [currentId] once the viewer (or
+    // the buffering rescue) has moved to another copy of the channel, which has its own id and no
+    // row of its own — channel up/down must still step from the row they were on.
+    var queueId by remember { mutableStateOf<Long?>(null) }
+    // A better copy of the struggling channel, on offer until taken, dismissed or timed out.
+    var suggestion by remember { mutableStateOf<StreamSuggestion?>(null) }
+    // Set briefly after the app changed copy by itself, so the change is explained.
+    var switchedTo by remember { mutableStateOf<String?>(null) }
+    // The copy the app moved away from by itself, for as long as OK can still take the viewer back.
+    var switchedFrom by remember { mutableStateOf<Channel?>(null) }
+    // Each channel gets one offer per visit to the player: a suggestion that keeps coming back
+    // after being ignored is nagging, and an automatic switch that can repeat is a loop.
+    val offered = remember { HashSet<Long>() }
     // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
     // Digits typed on the remote accumulate here, then jump to that channel number after a beat.
@@ -274,6 +299,9 @@ fun PlayerScreen(
                     title = channel.shownName,
                     userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                     isLive = true,
+                    channelId = channel.id,
+                    sourceId = channel.sourceId,
+                    groupKey = channel.groupKey,
                 ),
                 debounce = debounce,
             )
@@ -283,17 +311,22 @@ fun PlayerScreen(
     fun playChannelId(id: Long, debounce: Boolean = false) {
         // Remember where we came from so "Last channel" can bounce straight back. Quality switches
         // go through tuneTo directly, so they never count as a channel change here.
-        currentId?.let { if (it != id) previousId = it }
+        (queueId ?: currentId)?.let { if (it != id) previousId = it }
+        queueId = id
         scope.launch {
             val channel = graph.catalogRepository.channel(id) ?: return@launch
-            variants = graph.catalogRepository.variants(channel)
-            tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel, debounce)
+            // The copy that has been measured to play best, when optimising has anything to say.
+            val pick = graph.diagnostics.preferredCopy(channel)
+            val list = graph.catalogRepository.variants(pick)
+            variants = if (list.none { it.id == pick.id }) list + pick else list
+            tuneTo(pick, debounce)
         }
     }
 
     fun zapBy(delta: Int) {
         if (queue.isEmpty()) return
-        val cur = queue.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
+        val anchor = queueId ?: currentId
+        val cur = queue.indexOfFirst { it.id == anchor }.let { if (it < 0) 0 else it }
         val next = (cur + delta).coerceIn(0, queue.size - 1)
         if (next == cur) return
         // Banner first and synchronously — it paints on this frame, from the in-memory queue.
@@ -302,6 +335,25 @@ fun PlayerScreen(
         // actually opened. Without this, fast zapping starts (and abandons) a stream per channel,
         // which is what makes surfing feel like wading on a cheap box.
         playChannelId(queue[next].id, debounce = true)
+    }
+
+    /** Moves to another copy of the channel that is on, keeping the viewer's place in the list. */
+    fun switchCopy(target: StreamSuggestion) {
+        suggestion = null
+        switchedFrom = null
+        // Said out loud whether the viewer or the app chose it, so a changed picture is no mystery.
+        switchedTo = listOf(target.channel.name, target.sourceName).filter { it.isNotBlank() }.joinToString(" · ")
+        // The quality picker only lists one copy per quality; make sure the one now playing is in it.
+        if (variants.none { it.id == target.channel.id }) variants = variants + target.channel
+        tuneTo(target.channel)
+    }
+
+    /** Undoes a switch the app made by itself: back to the copy the viewer was on. */
+    fun undoSwitch() {
+        val back = switchedFrom ?: return
+        switchedFrom = null
+        switchedTo = null
+        tuneTo(back)
     }
 
     fun toggleRecord() {
@@ -322,10 +374,53 @@ fun PlayerScreen(
     LaunchedEffect(channelId) {
         val id = channelId ?: return@LaunchedEffect
         val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
-        variants = graph.catalogRepository.variants(channel)
+        val pick = graph.diagnostics.preferredCopy(channel)
+        val list = graph.catalogRepository.variants(pick)
+        variants = if (list.none { it.id == pick.id }) list + pick else list
+        queueId = id
         showBanner(id)
-        tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
+        tuneTo(pick)
     }
+
+    // The buffering rescue. When the stream on screen keeps stalling, look for another copy of the
+    // same channel with a better record on this device and offer it — or take it, if the viewer
+    // has asked for that in settings.
+    val struggling = liveStats?.let { it.struggling && it.channelId == currentId } == true
+    LaunchedEffect(struggling, currentId) {
+        val id = currentId ?: return@LaunchedEffect
+        // Keyed on the place in the channel list, not the copy: after a switch the new copy must
+        // not earn a fresh offer, or two bad copies would bounce the viewer back and forth.
+        if (!struggling || paused || !offered.add(queueId ?: id)) return@LaunchedEffect
+        val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
+        val best = graph.diagnostics.bestAlternative(channel) ?: return@LaunchedEffect
+        if (currentId != id) return@LaunchedEffect
+        if (autoSwitch) {
+            // The copy being moved to has had its one chance too, so two bad copies cannot
+            // bounce the viewer back and forth.
+            offered.add(best.channel.id)
+            switchCopy(best)
+            switchedFrom = channel
+        } else {
+            suggestion = best
+            // Clear the bottom of the screen so OK means "switch" and nothing else.
+            if (panel == Panel.NONE && !channelListVisible) controlsVisible = false
+        }
+    }
+    LaunchedEffect(suggestion) {
+        if (suggestion == null) return@LaunchedEffect
+        delay(SUGGESTION_TIMEOUT_MILLIS)
+        suggestion = null
+    }
+    LaunchedEffect(switchedTo) {
+        if (switchedTo == null) return@LaunchedEffect
+        delay(SWITCHED_NOTICE_MILLIS)
+        switchedTo = null
+        switchedFrom = null
+    }
+    // An offer belongs to the channel it was made for.
+    LaunchedEffect(queueId, currentId) { suggestion = null }
+    // Going back only makes sense while still on the channel the switch happened on.
+    LaunchedEffect(queueId) { switchedFrom = null }
 
     // Sleep timer: when the armed deadline passes, stop and leave the player. Re-arming from
     // settings restarts this effect with the new deadline.
@@ -418,6 +513,7 @@ fun PlayerScreen(
             infoExpanded -> infoExpanded = false
             bannerVisible -> bannerVisible = false
             controlsVisible -> controlsVisible = false
+            suggestion != null -> suggestion = null
             else -> {
                 controller.stop()
                 onBack()
@@ -490,6 +586,10 @@ fun PlayerScreen(
                         interaction++
                         false
                     }
+                    // A better copy is on offer and nothing else is on screen: OK takes it.
+                    suggestion != null && isSelectKey(event.key) -> { suggestion?.let(::switchCopy); true }
+                    // The app has just changed copy by itself: OK goes back to the old one.
+                    switchedFrom != null && switchedTo != null && isSelectKey(event.key) -> { undoSwitch(); true }
                     // Immersive: left opens the channel list, right the quality picker.
                     event.key == Key.DirectionLeft -> { if (queue.isNotEmpty()) channelListVisible = true; true }
                     event.key == Key.DirectionRight -> {
@@ -532,6 +632,34 @@ fun PlayerScreen(
                     .padding(horizontal = 28.dp, vertical = 16.dp),
             ) {
                 Text(numberEntry, color = Color.White, style = MaterialTheme.typography.displaySmall)
+            }
+        }
+
+        // Stream health, top-left, for as long as the viewer has it switched on.
+        val stats = liveStats
+        if (statsOverlay && stats != null && !inPip && !channelListVisible) {
+            StreamStatsOverlay(stats, Modifier.align(Alignment.TopStart).padding(24.dp))
+        }
+
+        // The buffering rescue: an offer while the screen is otherwise clear, or a note that the
+        // switch was made.
+        val offer = suggestion
+        val switched = switchedTo
+        if (!inPip && !channelListVisible) {
+            when {
+                switched != null ->
+                    StreamSwitchedCard(
+                        switched,
+                        canUndo = switchedFrom != null,
+                        onUndo = ::undoSwitch,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 28.dp),
+                    )
+                offer != null && !controlsVisible ->
+                    StreamSuggestionCard(
+                        offer,
+                        onAccept = { switchCopy(offer) },
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 28.dp),
+                    )
             }
         }
 
@@ -627,7 +755,12 @@ fun PlayerScreen(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Scrolls sideways when the buttons outnumber the screen (phones, large fonts);
+                // focus moving along the row brings each one into view.
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     if (controller.isSeekable) {
                         BarChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind), false) {
                             controller.seekBackward(); interaction++
@@ -672,6 +805,15 @@ fun PlayerScreen(
                     Spacer(Modifier.width(10.dp))
                     BarChip(Icons.Filled.AspectRatio, stringResource(R.string.player_aspect), panel == Panel.ASPECT) {
                         panel = if (panel == Panel.ASPECT) Panel.NONE else Panel.ASPECT; interaction++
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    BarChip(
+                        icon = Icons.Filled.Speed,
+                        label = stringResource(R.string.player_stats),
+                        selected = statsOverlay,
+                        iconTint = liveStats?.let { gradeColor(it.grade) },
+                    ) {
+                        settings.setStatsOverlayEnabled(!statsOverlay); interaction++
                     }
                     Spacer(Modifier.width(10.dp))
                     val recordingThis = activeRecordings.any { it.channelId == currentId }
@@ -719,7 +861,7 @@ fun PlayerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart),
         ) {
-            val currentIndex = queue.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+            val currentIndex = queue.indexOfFirst { it.id == (queueId ?: currentId) }.coerceAtLeast(0)
             val listState = rememberLazyListState()
             LaunchedEffect(Unit) { runCatching { listState.scrollToItem(currentIndex) } }
             Column(
@@ -738,7 +880,7 @@ fun PlayerScreen(
                 Spacer(Modifier.height(8.dp))
                 // A quick "jump back to the channel you just left" pin, TiviMate-style.
                 val lastItem = previousId?.let { pid -> queue.firstOrNull { it.id == pid } }
-                if (lastItem != null && lastItem.id != currentId) {
+                if (lastItem != null && lastItem.id != (queueId ?: currentId)) {
                     ChannelListRow(
                         item = lastItem,
                         playing = false,
@@ -755,7 +897,7 @@ fun PlayerScreen(
                     itemsIndexed(queue, key = { _, item -> item.id }) { index, item ->
                         ChannelListRow(
                             item = item,
-                            playing = item.id == currentId,
+                            playing = item.id == (queueId ?: currentId),
                             focusRequester = if (index == currentIndex) listFocus else null,
                             onClick = {
                                 playChannelId(item.id)
@@ -1028,6 +1170,13 @@ private fun BarChip(
 }
 
 private const val CONTROLS_TIMEOUT_MILLIS = 5_000L
+
+/** How long a "better copy available" offer waits for an answer before leaving. */
+private const val SUGGESTION_TIMEOUT_MILLIS = 15_000L
+private const val SWITCHED_NOTICE_MILLIS = 10_000L
+
+private fun isSelectKey(key: Key): Boolean =
+    key == Key.DirectionCenter || key == Key.Enter || key == Key.NumPadEnter
 
 /** How long the compact channel banner stays up after a zap. */
 private const val BANNER_TIMEOUT_MILLIS = 5_000L

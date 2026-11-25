@@ -67,6 +67,7 @@ import app.opentv.ui.onboarding.AddSourceScreen
 import app.opentv.ui.player.PlayerScreen
 import app.opentv.ui.settings.AboutScreen
 import app.opentv.ui.settings.AppSettingsScreen
+import app.opentv.ui.settings.DiagnosticsScreen
 import app.opentv.ui.settings.EpgSettingsScreen
 import app.opentv.ui.settings.ParentalControlsScreen
 import app.opentv.ui.settings.ProfilesScreen
@@ -199,6 +200,8 @@ object Routes {
     const val SYNC = "sync"
     const val REC_SETTINGS = "recording-settings"
     const val ABOUT = "about"
+    const val DIAGNOSTICS = "diagnostics"
+    const val OPTIMISE = "optimise"
     const val SERIES_DETAIL = "series/{seriesId}"
     const val MOVIE_DETAIL = "movie/{movieId}"
     const val EDIT_SOURCE = "edit-source/{sourceId}"
@@ -419,6 +422,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     onOpenParental = { navController.navigate(Routes.PARENTAL) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },
                     onOpenRecordings = { navController.navigate(Routes.REC_SETTINGS) },
+                    onOpenDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
                     onOpenAbout = { navController.navigate(Routes.ABOUT) },
                     onBack = { navController.popBackStack() },
                 )
@@ -455,6 +459,16 @@ private fun OpenTvApp(isTelevision: Boolean) {
 
             composable(Routes.ADDONS) {
                 StremioAddonsScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Routes.DIAGNOSTICS) {
+                DiagnosticsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenOptimise = { navController.navigate(Routes.OPTIMISE) },
+                )
+            }
+            composable(Routes.OPTIMISE) {
+                app.opentv.ui.settings.OptimiseScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.ABOUT) {
