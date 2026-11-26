@@ -97,6 +97,12 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             favouriteMovies = graph.catalogRepository.favouriteMovieUrls(),
             favouriteSeries = graph.catalogRepository.favouriteSeriesIds(),
             hiddenCategories = graph.settings.hiddenCategories.value.toList(),
+            userHiddenLiveCategories = graph.settings.userHiddenLiveCategories.value.toList(),
+            liveCategoryOrder = graph.settings.liveCategoryOrder.value,
+            userHiddenMovieCategories = graph.settings.userHiddenMovieCategories.value.toList(),
+            movieCategoryOrder = graph.settings.movieCategoryOrder.value,
+            userHiddenSeriesCategories = graph.settings.userHiddenSeriesCategories.value.toList(),
+            seriesCategoryOrder = graph.settings.seriesCategoryOrder.value,
             recordings = recordings,
         )
     }
@@ -145,6 +151,33 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             graph.settings.setHiddenCategories(
                 graph.settings.hiddenCategories.value + bundle.hiddenCategories,
             )
+        }
+        if (bundle.userHiddenLiveCategories.isNotEmpty()) {
+            graph.settings.setUserHiddenLiveCategories(
+                graph.settings.userHiddenLiveCategories.value + bundle.userHiddenLiveCategories,
+            )
+        }
+        if (bundle.liveCategoryOrder.isNotEmpty()) {
+            val merged = (bundle.liveCategoryOrder + graph.settings.liveCategoryOrder.value).distinct()
+            graph.settings.setLiveCategoryOrder(merged)
+        }
+        if (bundle.userHiddenMovieCategories.isNotEmpty()) {
+            graph.settings.setUserHiddenMovieCategories(
+                graph.settings.userHiddenMovieCategories.value + bundle.userHiddenMovieCategories,
+            )
+        }
+        if (bundle.movieCategoryOrder.isNotEmpty()) {
+            val merged = (bundle.movieCategoryOrder + graph.settings.movieCategoryOrder.value).distinct()
+            graph.settings.setMovieCategoryOrder(merged)
+        }
+        if (bundle.userHiddenSeriesCategories.isNotEmpty()) {
+            graph.settings.setUserHiddenSeriesCategories(
+                graph.settings.userHiddenSeriesCategories.value + bundle.userHiddenSeriesCategories,
+            )
+        }
+        if (bundle.seriesCategoryOrder.isNotEmpty()) {
+            val merged = (bundle.seriesCategoryOrder + graph.settings.seriesCategoryOrder.value).distinct()
+            graph.settings.setSeriesCategoryOrder(merged)
         }
 
         // NAS recordings — insert any smb:// recording we don't already have, keyed by its locator.

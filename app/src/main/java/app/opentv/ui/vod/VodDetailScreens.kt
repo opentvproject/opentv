@@ -5,6 +5,7 @@
  */
 package app.opentv.ui.vod
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,8 +88,10 @@ fun MovieDetailScreen(
     onDownload: (Movie) -> Unit,
     onOpenMovie: (Movie) -> Unit,
     onOpenPerson: (String) -> Unit,
+    onBack: () -> Unit,
     viewModel: VodViewModel = viewModel(),
 ) {
+    BackHandler { onBack() }
     var movie by remember(movieId) { mutableStateOf<Movie?>(null) }
     var moreLike by remember(movieId) { mutableStateOf<List<Movie>>(emptyList()) }
     var resumeExists by remember(movieId) { mutableStateOf(false) }
@@ -293,8 +296,10 @@ fun SeriesDetailScreen(
     onPlayEpisode: (mediaKey: String, url: String, title: String) -> Unit,
     onOpenSeries: (Series) -> Unit,
     onOpenPerson: (String) -> Unit,
+    onBack: () -> Unit,
     viewModel: VodViewModel = viewModel(),
 ) {
+    BackHandler { onBack() }
     var series by remember(seriesId) { mutableStateOf<Series?>(null) }
     var moreLike by remember(seriesId) { mutableStateOf<List<Series>>(emptyList()) }
     val favFocus = remember { FocusRequester() }

@@ -236,44 +236,45 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         combine(
             graph.catalogRepository.observeCategories(StreamKind.LIVE),
             selectedSource,
-        ) { raw, sourceId ->
+            settings.liveCategoryOrder,
+        ) { raw, sourceId, order ->
             // Scope the category rail to the chosen provider, so a second playlist's categories show
             // on their own (cardiodoc's "keep sources separate"); null folds across every provider.
             val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
-            foldCategories(scoped)
+            val folded = foldLiveCategories(scoped)
+            sortLiveCategories(folded, order)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
-     * Folds codec-split provider categories into one logical [CategoryGroup] each — 'UK| GENERAL
-     * HD/RAW' and 'UK| GENERAL hevc' become a single "General" entry that filters across every
-     * underlying id at once. Shared by the guide's [categoryGroups] and the manager's
-     * [managerCategoryGroups] so both group the rail identically.
-     */
-    private fun foldCategories(raw: List<Category>): List<CategoryGroup> {
-        val groups = LinkedHashMap<String, Pair<String, MutableList<String>>>()
-        for (category in raw) {
-            val n = ChannelNameNormalizer.normalize(category.name)
-            val key = n.groupKey.ifEmpty { category.id }
-            val entry = groups.getOrPut(key) { n.baseName to mutableListOf() }
-            entry.second += category.id
-        }
-        return groups.map { (key, value) -> CategoryGroup(key, value.first, value.second) }
-    }
-
-    /**
      * The category ids to hide from the guide *right now*: the ids behind every group the user
-     * marked adult — unless the session is unlocked, in which case nothing is hidden.
+     * marked adult or hidden in category settings — unless the session is unlocked, in which case
+     * adult-locked ones appear, but user-hidden categories remain hidden.
      */
     private val hiddenCategoryIds: StateFlow<Set<String>> =
-        combine(categoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
-            if (unlocked) emptySet()
-            else groups.filter { it.key in hidden }.flatMap { it.ids }.toSet()
+        combine(
+            categoryGroups,
+            settings.hiddenCategories,
+            settings.hiddenUnlocked,
+            settings.userHiddenLiveCategories,
+        ) { groups, adultHidden, unlocked, userHidden ->
+            val adultIds = if (unlocked) emptySet() else groups.filter { it.key in adultHidden }.flatMap { it.ids }.toSet()
+            val userIds = groups.filter { it.key in userHidden }.flatMap { it.ids }.toSet()
+            adultIds + userIds
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    /** The rail's view of categories: hidden ones drop out until the session is unlocked. */
+    /** The rail's view of categories: hidden ones drop out. */
     val visibleCategoryGroups: StateFlow<List<CategoryGroup>> =
-        combine(categoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
-            if (unlocked) groups else groups.filter { it.key !in hidden }
+        combine(
+            categoryGroups,
+            settings.hiddenCategories,
+            settings.hiddenUnlocked,
+            settings.userHiddenLiveCategories,
+        ) { groups, adultHidden, unlocked, userHidden ->
+            groups.filter { g ->
+                val isAdultHidden = !unlocked && (g.key in adultHidden)
+                val isUserHidden = g.key in userHidden
+                !isAdultHidden && !isUserHidden
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -360,7 +361,11 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                     .map { programmes -> programmes.groupBy { it.epgChannelId } }
             }
             .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+                emptyMap(),
+            )
 
     /** Guards the start-up loading bar so it shows once, on the first build, not on every tap. */
     @Volatile
@@ -415,7 +420,11 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             // Once the first guide is on screen, clear the start-up bar — and never show it for a
             // plain category switch again.
             .onEach { if (!guideBuilt) { guideBuilt = true; StatusBus.set(null) } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+                emptyList(),
+            )
 
     private fun buildRows(
         channels: List<Channel>,
@@ -594,9 +603,11 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         combine(
             graph.catalogRepository.observeCategories(StreamKind.LIVE),
             managerSelectedSource,
-        ) { raw, sourceId ->
+            settings.liveCategoryOrder,
+        ) { raw, sourceId, order ->
             val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
-            foldCategories(scoped)
+            val folded = foldLiveCategories(scoped)
+            sortLiveCategories(folded, order)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -725,12 +736,148 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
         val progress: Float,
     )
 
+    data class HistoryItem(
+        val mediaKey: String,
+        val title: String,
+        val resumeTitle: String,
+        val subtitle: String?,
+        val posterUrl: String?,
+        val streamUrl: String,
+        val progress: Float,
+        val isWatched: Boolean,
+        val movie: Movie? = null,
+        val series: Series? = null,
+    )
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val continueWatching: StateFlow<List<ResumeItem>> =
         settings.activeProfileId
             .flatMapLatest { pid -> graph.playbackPositions.observeRecent(pid) }
             .mapLatest { positions -> positions.filter { !it.isFinished }.mapNotNull { resolveResume(it) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Continue Watching filtered to movies only — for the Movies tab. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val continueWatchingMovies: StateFlow<List<ResumeItem>> =
+        settings.activeProfileId
+            .flatMapLatest { pid -> graph.playbackPositions.observeRecent(pid) }
+            .mapLatest { positions ->
+                positions.filter { !it.isFinished && it.mediaKey.startsWith("movie:") }
+                    .mapNotNull { resolveResume(it) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Continue Watching filtered to episodes only — for the Shows tab. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val continueWatchingEpisodes: StateFlow<List<ResumeItem>> =
+        settings.activeProfileId
+            .flatMapLatest { pid -> graph.playbackPositions.observeRecent(pid) }
+            .mapLatest { positions ->
+                positions.filter { !it.isFinished && it.mediaKey.startsWith("ep:") }
+                    .mapNotNull { resolveResume(it) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val favouriteMovies: StateFlow<List<Movie>> =
+        graph.catalogRepository.observeFavouriteMovies()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val favouriteSeries: StateFlow<List<Series>> =
+        graph.catalogRepository.observeFavouriteSeries()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val watchHistory: StateFlow<List<HistoryItem>> =
+        settings.activeProfileId
+            .flatMapLatest { profileId -> graph.playbackPositions.observeForProfile(profileId) }
+            .mapLatest { positions ->
+                val parsed = positions.mapNotNull { position ->
+                    val parts = position.mediaKey.split(":", limit = 2)
+                    if (parts.size != 2) return@mapNotNull null
+                    val id = parts[1].toLongOrNull() ?: return@mapNotNull null
+                    Triple(position, parts[0], id)
+                }
+                val movieIds = parsed.filter { it.second == "movie" }.map { it.third }
+                val episodeIds = parsed.filter { it.second == "ep" }.map { it.third }
+                val moviesById = graph.catalogRepository.moviesByIds(movieIds)
+                val episodesById = graph.catalogRepository.episodesByIds(episodeIds)
+                val seriesByProviderId = graph.catalogRepository.seriesForProviderIds(
+                    episodesById.values.map { it.seriesId },
+                )
+
+                val seenShows = mutableSetOf<Pair<Long, Boolean>>()
+                buildList {
+                    for ((position, kind, id) in parsed) {
+                        val progress = if (position.durationMillis > 0) {
+                            (position.positionMillis.toFloat() / position.durationMillis).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        when (kind) {
+                            "movie" -> moviesById[id]?.let { movie ->
+                                add(
+                                    HistoryItem(
+                                        mediaKey = position.mediaKey,
+                                        title = movie.displayTitle,
+                                        resumeTitle = movie.displayTitle,
+                                        subtitle = movie.year?.toString(),
+                                        posterUrl = movie.posterUrl,
+                                        streamUrl = movie.streamUrl,
+                                        progress = progress,
+                                        isWatched = position.isFinished,
+                                        movie = movie,
+                                    ),
+                                )
+                            }
+                            "ep" -> {
+                                val episode = episodesById[id] ?: continue
+                                val show = seriesByProviderId[episode.sourceId to episode.seriesId]
+                                    ?: continue
+                                if (seenShows.add(show.id to position.isFinished)) {
+                                    val episodeLabel = "S${episode.season} E${episode.episodeNumber}"
+                                    add(
+                                        HistoryItem(
+                                            mediaKey = position.mediaKey,
+                                            title = show.displayTitle,
+                                            resumeTitle = episode.title.ifBlank { show.displayTitle },
+                                            subtitle = "$episodeLabel · ${episode.title.ifBlank { episodeLabel }}",
+                                            posterUrl = show.posterUrl ?: episode.stillUrl,
+                                            streamUrl = episode.streamUrl,
+                                            progress = progress,
+                                            isWatched = position.isFinished,
+                                            series = show,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+                emptyList(),
+            )
+
+    fun clearHistoryItem(item: HistoryItem) {
+        val profileId = settings.activeProfileId.value
+        viewModelScope.launch {
+            when {
+                item.movie != null -> graph.playbackPositions.delete(profileId, item.mediaKey)
+                item.series != null -> graph.playbackPositions.deleteForSeries(
+                    profileId,
+                    item.series.sourceId,
+                    item.series.seriesId,
+                )
+            }
+        }
+    }
+
+    fun clearWatchHistory() {
+        val profileId = settings.activeProfileId.value
+        viewModelScope.launch { graph.playbackPositions.deleteForProfile(profileId) }
+    }
 
     private suspend fun resolveResume(pos: PlaybackPosition): ResumeItem? {
         val parts = pos.mediaKey.split(":", limit = 2)
@@ -766,32 +913,56 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
         graph.sourceRepository.observeAll()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Category chips scoped to the chosen provider: pick a provider and you see only its categories,
-    // and since a category id belongs to one provider, the grid you then open is already that
-    // provider's titles. null folds categories across every provider ("All sources").
+    // Category chips scoped to the chosen provider and filtered/ordered by user settings.
     val movieCategories: StateFlow<List<Category>> =
         combine(
             graph.catalogRepository.observeCategories(StreamKind.MOVIE),
             selectedVodSource,
-        ) { raw, sourceId -> if (sourceId == null) raw else raw.filter { it.sourceId == sourceId } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            settings.userHiddenMovieCategories,
+            settings.movieCategoryOrder,
+        ) { raw, sourceId, hidden, order ->
+            val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
+            val visible = scoped.filterNot { isVodCategoryHidden(it, hidden) }
+            sortVodCategories(visible, order)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val seriesCategories: StateFlow<List<Category>> =
         combine(
             graph.catalogRepository.observeCategories(StreamKind.SERIES),
             selectedVodSource,
-        ) { raw, sourceId -> if (sourceId == null) raw else raw.filter { it.sourceId == sourceId } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            settings.userHiddenSeriesCategories,
+            settings.seriesCategoryOrder,
+        ) { raw, sourceId, hidden, order ->
+            val scoped = if (sourceId == null) raw else raw.filter { it.sourceId == sourceId }
+            val visible = scoped.filterNot { isVodCategoryHidden(it, hidden) }
+            sortVodCategories(visible, order)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val movies: StateFlow<List<Movie>> = movieCategory
-        .flatMapLatest { graph.catalogRepository.observeMovies(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val movies: StateFlow<List<Movie>> = combine(movieCategory, selectedVodSource) { category, sourceId ->
+        category to sourceId
+    }.flatMapLatest { (category, sourceId) ->
+        if (category == null) flowOf(emptyList())
+        else graph.catalogRepository.observeMovies(category, sourceId)
+    }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+            emptyList(),
+        )
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val series: StateFlow<List<Series>> = seriesCategory
-        .flatMapLatest { graph.catalogRepository.observeSeries(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val series: StateFlow<List<Series>> = combine(seriesCategory, selectedVodSource) { category, sourceId ->
+        category to sourceId
+    }.flatMapLatest { (category, sourceId) ->
+        if (category == null) flowOf(emptyList())
+        else graph.catalogRepository.observeSeries(category, sourceId)
+    }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+            emptyList(),
+        )
 
     fun selectMovieCategory(id: String?) { movieCategory.value = id }
 
@@ -899,23 +1070,31 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
                     prev.movieCount == movieCount && prev.seriesCount == seriesCount
                 ) return@withLock
 
-                // One scan of each library (repo switches to IO), reused across every computed row.
-                val allMovies = runCatching { graph.catalogRepository.allMovies() }.getOrDefault(emptyList())
-                val allSeries = runCatching { graph.catalogRepository.allSeries() }.getOrDefault(emptyList())
-
-                _recommendedMovies.value = runCatching {
-                    graph.catalogRepository.recommendedMoviesFrom(allMovies, profileId)
-                }.getOrDefault(emptyList())
-                _movieGenreRows.value = runCatching {
-                    graph.catalogRepository.moviesByGenreFrom(allMovies)
-                }.getOrDefault(emptyList())
-                _seriesGenreRows.value = runCatching {
-                    graph.catalogRepository.seriesByGenreFrom(allSeries)
-                }.getOrDefault(emptyList())
+                // Keep the full catalogue scans sequential: a large Movies list should be eligible
+                // for collection before the full Shows list is loaded.
+                loadMovieHomeFeeds(profileId)
+                loadSeriesHomeFeeds()
 
                 loadedHomeFeeds = HomeFeedsKey(profileId, movieCount, seriesCount)
             }
         }
+    }
+
+    private suspend fun loadMovieHomeFeeds(profileId: Long) {
+        val movies = runCatching { graph.catalogRepository.allMovies() }.getOrDefault(emptyList())
+        _recommendedMovies.value = runCatching {
+            graph.catalogRepository.recommendedMoviesFrom(movies, profileId)
+        }.getOrDefault(emptyList())
+        _movieGenreRows.value = runCatching {
+            graph.catalogRepository.moviesByGenreFrom(movies)
+        }.getOrDefault(emptyList())
+    }
+
+    private suspend fun loadSeriesHomeFeeds() {
+        val shows = runCatching { graph.catalogRepository.allSeries() }.getOrDefault(emptyList())
+        _seriesGenreRows.value = runCatching {
+            graph.catalogRepository.seriesByGenreFrom(shows)
+        }.getOrDefault(emptyList())
     }
 
     // Movies + series load on demand — the first time the user opens Movies or Shows — rather than
@@ -1307,5 +1486,156 @@ class WebManagerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         server.stop()
+    }
+}
+
+/**
+ * Drives the category management settings screen.
+ * Supports viewing, reordering and hiding categories for TV channels, Shows and VOD (Movies).
+ */
+class CategoriesViewModel(app: Application) : AndroidViewModel(app) {
+    private val graph = ServiceLocator.get(app)
+    val settings = graph.settings
+
+    val selectedKind = MutableStateFlow(StreamKind.LIVE)
+    val selectedSource = MutableStateFlow<Long?>(null)
+
+    val sources: StateFlow<List<Source>> =
+        graph.sourceRepository.observeAll()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    data class CategoryItem(
+        val key: String,
+        val label: String,
+        val isHidden: Boolean,
+    )
+
+    private data class Params(
+        val kind: StreamKind,
+        val sourceId: Long?,
+        val hiddenLive: Set<String>,
+        val orderLive: List<String>,
+        val hiddenMovie: Set<String>,
+        val orderMovie: List<String>,
+        val hiddenSeries: Set<String>,
+        val orderSeries: List<String>,
+    )
+
+    private data class CategoryPreferences(
+        val hidden: Set<String>,
+        val order: List<String>,
+    )
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val categories: StateFlow<List<CategoryItem>> =
+        combine(
+            combine(selectedKind, selectedSource) { kind, sourceId -> kind to sourceId },
+            combine(settings.userHiddenLiveCategories, settings.liveCategoryOrder, ::CategoryPreferences),
+            combine(settings.userHiddenMovieCategories, settings.movieCategoryOrder, ::CategoryPreferences),
+            combine(settings.userHiddenSeriesCategories, settings.seriesCategoryOrder, ::CategoryPreferences),
+        ) { selection, live, movies, series ->
+            Params(
+                kind = selection.first,
+                sourceId = selection.second,
+                hiddenLive = live.hidden,
+                orderLive = live.order,
+                hiddenMovie = movies.hidden,
+                orderMovie = movies.order,
+                hiddenSeries = series.hidden,
+                orderSeries = series.order,
+            )
+        }.flatMapLatest { p ->
+            graph.catalogRepository.observeCategories(p.kind).map { raw ->
+                val scoped = if (p.sourceId == null) raw else raw.filter { it.sourceId == p.sourceId }
+                when (p.kind) {
+                    StreamKind.LIVE -> {
+                        val sorted = sortLiveCategories(foldLiveCategories(scoped), p.orderLive)
+                        sorted.map { g ->
+                            CategoryItem(
+                                key = g.key,
+                                label = g.label,
+                                isHidden = g.key in p.hiddenLive,
+                            )
+                        }
+                    }
+                    StreamKind.MOVIE -> {
+                        val sorted = sortVodCategories(scoped, p.orderMovie)
+                        sorted.map { cat ->
+                            val key = "${cat.sourceId}:${cat.id}"
+                            CategoryItem(
+                                key = key,
+                                label = categoryLabel(cat, p.sourceId),
+                                isHidden = isVodCategoryHidden(cat, p.hiddenMovie),
+                            )
+                        }
+                    }
+                    StreamKind.SERIES -> {
+                        val sorted = sortVodCategories(scoped, p.orderSeries)
+                        sorted.map { cat ->
+                            val key = "${cat.sourceId}:${cat.id}"
+                            CategoryItem(
+                                key = key,
+                                label = categoryLabel(cat, p.sourceId),
+                                isHidden = isVodCategoryHidden(cat, p.hiddenSeries),
+                            )
+                        }
+                    }
+                }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private fun categoryLabel(category: Category, sourceId: Long?): String {
+        if (sourceId != null || sources.value.size < 2) return category.name
+        val sourceName = sources.value.firstOrNull { it.id == category.sourceId }?.name ?: return category.name
+        return "$sourceName · ${category.name}"
+    }
+
+    fun selectKind(kind: StreamKind) {
+        selectedKind.value = kind
+    }
+
+    fun selectSource(sourceId: Long?) {
+        selectedSource.value = sourceId
+    }
+
+    fun toggleHidden(key: String) {
+        settings.toggleCategoryHidden(selectedKind.value, key)
+    }
+
+    fun moveCategory(key: String, delta: Int) {
+        val currentKeys = categories.value.map { it.key }
+        val savedOrder = when (selectedKind.value) {
+            StreamKind.LIVE -> settings.liveCategoryOrder.value
+            StreamKind.MOVIE -> settings.movieCategoryOrder.value
+            StreamKind.SERIES -> settings.seriesCategoryOrder.value
+        }
+        val mergedOrder = reorderVisibleCategories(currentKeys, savedOrder, key, delta) ?: return
+        when (selectedKind.value) {
+            StreamKind.LIVE -> settings.setLiveCategoryOrder(mergedOrder)
+            StreamKind.MOVIE -> settings.setMovieCategoryOrder(mergedOrder)
+            StreamKind.SERIES -> settings.setSeriesCategoryOrder(mergedOrder)
+        }
+    }
+
+    fun resetOrder() {
+        settings.resetCategoryOrder(selectedKind.value)
+    }
+
+    fun showAll() {
+        if (selectedSource.value == null) {
+            settings.showAllCategories(selectedKind.value)
+        } else {
+            val visibleKeys = categories.value.map { it.key }.toSet()
+            settings.showCategories(selectedKind.value, visibleKeys)
+        }
+    }
+
+    fun hideAll() {
+        val visibleKeys = categories.value.map { it.key }.toSet()
+        if (selectedSource.value == null) {
+            settings.hideAllCategories(selectedKind.value, visibleKeys)
+        } else {
+            settings.hideCategories(selectedKind.value, visibleKeys)
+        }
     }
 }

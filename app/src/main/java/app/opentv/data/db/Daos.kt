@@ -425,11 +425,12 @@ interface MovieDao {
     @Query(
         """
         SELECT * FROM movies
-        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+                WHERE (:sourceId IS NULL OR sourceId = :sourceId)
+                    AND (:categoryId IS NULL OR categoryId = :categoryId)
         ORDER BY addedMillis DESC, name
         """
     )
-    fun observe(categoryId: String?): Flow<List<Movie>>
+        fun observe(categoryId: String?, sourceId: Long?): Flow<List<Movie>>
 
     @Query("SELECT * FROM movies WHERE favourite = 1 ORDER BY name")
     fun observeFavourites(): Flow<List<Movie>>
@@ -499,6 +500,9 @@ interface MovieDao {
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun byId(id: Long): Movie?
 
+    @Query("SELECT * FROM movies WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<Movie>
+
     /** Stream URL is the cross-device key: the same film has the same URL on the same provider. */
     @Query("SELECT * FROM movies WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Movie?
@@ -525,11 +529,12 @@ interface SeriesDao {
     @Query(
         """
         SELECT * FROM series
-        WHERE (:categoryId IS NULL OR categoryId = :categoryId)
+                WHERE (:sourceId IS NULL OR sourceId = :sourceId)
+                    AND (:categoryId IS NULL OR categoryId = :categoryId)
         ORDER BY addedMillis DESC, name
         """
     )
-    fun observe(categoryId: String?): Flow<List<Series>>
+        fun observe(categoryId: String?, sourceId: Long?): Flow<List<Series>>
 
     @Query("SELECT * FROM series WHERE name LIKE '%' || :query || '%' ORDER BY name LIMIT :limit")
     fun search(query: String, limit: Int = 200): Flow<List<Series>>
@@ -570,8 +575,17 @@ interface SeriesDao {
     )
     suspend fun seriesWithActor(name: String, limit: Int): List<Series>
 
+    @Query("SELECT * FROM series WHERE favourite = 1 ORDER BY name")
+    fun observeFavourites(): Flow<List<Series>>
+
     @Query("SELECT * FROM series WHERE id = :id")
     suspend fun byId(id: Long): Series?
+
+    @Query("SELECT * FROM series WHERE sourceId = :sourceId AND seriesId = :seriesId LIMIT 1")
+    suspend fun byProviderId(sourceId: Long, seriesId: String): Series?
+
+    @Query("SELECT * FROM series WHERE seriesId IN (:seriesIds)")
+    suspend fun byProviderIds(seriesIds: List<String>): List<Series>
 
     @Query("UPDATE series SET favourite = :favourite WHERE id = :id")
     suspend fun setFavourite(id: Long, favourite: Boolean)
@@ -598,6 +612,20 @@ interface EpisodeDao {
     @Query("SELECT * FROM episodes WHERE id = :id")
     suspend fun byId(id: Long): Episode?
 
+    @Query("SELECT * FROM episodes WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<Episode>
+
+    @Query(
+        """
+        SELECT * FROM episodes
+        WHERE sourceId = :sourceId AND seriesId = :seriesId
+          AND (season > :season OR (season = :season AND episodeNumber > :episodeNumber))
+        ORDER BY season, episodeNumber
+        LIMIT 1
+        """
+    )
+    suspend fun nextForSeries(sourceId: Long, seriesId: String, season: Int, episodeNumber: Int): Episode?
+
     @Query("SELECT * FROM episodes WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Episode?
 
@@ -619,6 +647,13 @@ interface PlaybackPositionDao {
     )
     fun observeRecent(profileId: Long, limit: Int = 30): Flow<List<PlaybackPosition>>
 
+    /** Recent profile history, newest activity first — bounded for My View. */
+    @Query(
+        "SELECT * FROM playback_positions WHERE profileId = :profileId " +
+            "ORDER BY updatedAtMillis DESC LIMIT :limit",
+    )
+    fun observeForProfile(profileId: Long, limit: Int = 200): Flow<List<PlaybackPosition>>
+
     @Query("SELECT * FROM playback_positions")
     suspend fun all(): List<PlaybackPosition>
 
@@ -631,6 +666,21 @@ interface PlaybackPositionDao {
 
     @Query("DELETE FROM playback_positions WHERE profileId = :profileId AND mediaKey = :key")
     suspend fun delete(profileId: Long, key: String)
+
+        @Query(
+                """
+                DELETE FROM playback_positions
+                WHERE profileId = :profileId
+                    AND mediaKey IN (
+                        SELECT 'ep:' || id FROM episodes
+                        WHERE sourceId = :sourceId AND seriesId = :seriesId
+                    )
+                """
+        )
+        suspend fun deleteForSeries(profileId: Long, sourceId: Long, seriesId: String)
+
+        @Query("DELETE FROM playback_positions WHERE profileId = :profileId")
+        suspend fun deleteForProfile(profileId: Long)
 }
 
 @Dao

@@ -5,9 +5,18 @@
  */
 package app.opentv.ui.vod
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -17,22 +26,23 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,14 +54,18 @@ import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -83,6 +98,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.C
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
@@ -91,7 +107,10 @@ import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
+import app.opentv.pairing.SubtitleUploadServer
 import app.opentv.player.PlayerController
+import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -115,6 +134,7 @@ fun VodPlayerScreen(
     streamUrl: String,
     title: String,
     userAgent: String,
+    onPlayNext: (mediaKey: String, streamUrl: String, title: String) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -162,13 +182,98 @@ fun VodPlayerScreen(
     var durationMs by remember { mutableLongStateOf(0L) }
     var scrubbing by remember { mutableStateOf(false) }
     var scrubValue by remember { mutableFloatStateOf(0f) }
+    var nextEpisode by remember(mediaKey) { mutableStateOf<app.opentv.data.model.Episode?>(null) }
+    var nextEpisodeDismissed by remember(mediaKey) { mutableStateOf(false) }
+    var showExternalSubtitleDialog by remember { mutableStateOf(false) }
 
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val barFocus = remember { FocusRequester() }
+    val rewindFocus = remember { FocusRequester() }
+    val forwardFocus = remember { FocusRequester() }
     val rootFocus = remember { FocusRequester() }
 
     fun reveal() { controlsVisible = true; interaction++ }
+
+    LaunchedEffect(mediaKey) {
+        val episodeId = mediaKey.removePrefix("ep:").takeIf { it != mediaKey }?.toLongOrNull()
+        nextEpisode = episodeId?.let { graph.catalogRepository.nextEpisode(it) }
+    }
+
+    fun playNextEpisode() {
+        val next = nextEpisode ?: return
+        val nextTitle = next.title.ifBlank { "S${next.season} E${next.episodeNumber}" }
+        onPlayNext("ep:${next.id}", next.streamUrl, nextTitle)
+    }
+
+    val nextEpisodeRemainingMs = (durationMs - positionMs).coerceAtLeast(0L)
+    val showNextEpisodePrompt = nextEpisode != null && !nextEpisodeDismissed &&
+        durationMs > 0L && nextEpisodeRemainingMs <= 60_000L
+
+    LaunchedEffect(showNextEpisodePrompt) {
+        if (showNextEpisodePrompt) reveal()
+    }
+
+    fun handlePickedSubtitleUri(uri: Uri?) {
+        if (uri == null) return
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        val name = subtitleDisplayName(context, uri)
+        val mimeType = SubtitleUploadServer.subtitleMimeTypeForName(
+            name,
+            context.contentResolver.getType(uri),
+        )
+        if (mimeType == null) {
+            Toast.makeText(context, R.string.player_external_subtitle_unsupported, Toast.LENGTH_LONG).show()
+        } else {
+            val resolvedUri = copySubtitleToCache(context, uri, name) ?: uri
+            controller.setExternalSubtitle(resolvedUri, mimeType, name?.substringBeforeLast('.'))
+            reveal()
+        }
+    }
+
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+        ::handlePickedSubtitleUri,
+    )
+    val getContentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+        ::handlePickedSubtitleUri,
+    )
+
+    fun launchExternalSubtitlePicker() {
+        val mimeTypes = arrayOf("text/*", "application/x-subrip", "application/ttml+xml", "application/octet-stream")
+        val openDocIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+        }
+        val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        when {
+            hasRealActivityHandler(context, openDocIntent) -> {
+                try {
+                    openDocumentLauncher.launch(mimeTypes)
+                } catch (_: ActivityNotFoundException) {
+                    showExternalSubtitleDialog = true
+                }
+            }
+            hasRealActivityHandler(context, getContentIntent) -> {
+                try {
+                    getContentLauncher.launch("*/*")
+                } catch (_: ActivityNotFoundException) {
+                    showExternalSubtitleDialog = true
+                }
+            }
+            else -> showExternalSubtitleDialog = true
+        }
+    }
 
     suspend fun savePosition() {
         val player = controller.player
@@ -184,6 +289,15 @@ fun VodPlayerScreen(
                     updatedAtMillis = System.currentTimeMillis(),
                 ),
             )
+        }
+    }
+
+    LaunchedEffect(state, nextEpisode?.id, nextEpisodeDismissed, paused) {
+        if (state is PlayerController.State.Ended) {
+            savePosition()
+            if (nextEpisode != null && !nextEpisodeDismissed && !paused) {
+                playNextEpisode()
+            }
         }
     }
 
@@ -273,10 +387,12 @@ fun VodPlayerScreen(
     // Auto-hide when playing and not paused/scrubbing and no picker open. A growing recording dips in
     // and out of Buffering as it rides the write head, so for that case Buffering counts as "playing"
     // here — otherwise a single hiccup would pin the transport bar on screen for the rest of the watch.
-    LaunchedEffect(controlsVisible, interaction, state, paused, scrubbing, vodPanel) {
+    LaunchedEffect(controlsVisible, interaction, state, paused, scrubbing, vodPanel, showNextEpisodePrompt, showExternalSubtitleDialog) {
         val activelyPlaying = state is PlayerController.State.Playing ||
             (growingRec && state is PlayerController.State.Buffering)
-        if (controlsVisible && !paused && !scrubbing && vodPanel == VodPanel.NONE && activelyPlaying) {
+        if (controlsVisible && !showNextEpisodePrompt && !showExternalSubtitleDialog &&
+            !paused && !scrubbing && vodPanel == VodPanel.NONE && activelyPlaying
+        ) {
             delay(5_000)
             controlsVisible = false
         }
@@ -297,6 +413,7 @@ fun VodPlayerScreen(
             (growingRec && state is PlayerController.State.Buffering)
         when {
             showResume -> onBack()
+            showExternalSubtitleDialog -> showExternalSubtitleDialog = false
             vodPanel != VodPanel.NONE -> vodPanel = VodPanel.NONE
             controlsVisible && activelyPlaying && !paused -> controlsVisible = false
             else -> onBack()
@@ -391,6 +508,10 @@ fun VodPlayerScreen(
                         controller = controller,
                         tracks = tracks,
                         firstFocus = panelFocus,
+                        onAddExternalSubtitle = {
+                            vodPanel = VodPanel.NONE
+                            launchExternalSubtitlePicker()
+                        },
                         onDone = { vodPanel = VodPanel.NONE; interaction++ },
                     )
                     Spacer(Modifier.height(16.dp))
@@ -416,7 +537,7 @@ fun VodPlayerScreen(
                 Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
                 Spacer(Modifier.height(8.dp))
 
-                // Seek bar with times either side. Left/right on the remote scrubs.
+                // Seek bar with times either side. Left/right/down moves focus to the transport buttons.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(formatDuration(if (scrubbing) scrubValue.toLong() else positionMs), color = Color.White)
                     Spacer(Modifier.width(12.dp))
@@ -430,7 +551,22 @@ fun VodPlayerScreen(
                             scrubbing = false
                             interaction++
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusProperties {
+                                left = rewindFocus
+                                right = forwardFocus
+                                down = barFocus
+                            }
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
+                                ) {
+                                    val target = if (event.key == Key.DirectionLeft) rewindFocus else forwardFocus
+                                    runCatching { target.requestFocus() }
+                                    true
+                                } else false
+                            },
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(formatDuration(durationMs), color = Color.White)
@@ -439,7 +575,7 @@ fun VodPlayerScreen(
                 Spacer(Modifier.height(10.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    VodChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind)) {
+                    VodChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind), rewindFocus) {
                         if (growingRec) seekRelative(-15_000) else controller.seekBackward(); interaction++
                     }
                     Spacer(Modifier.width(10.dp))
@@ -453,7 +589,7 @@ fun VodPlayerScreen(
                         interaction++
                     }
                     Spacer(Modifier.width(10.dp))
-                    VodChip(Icons.Filled.FastForward, stringResource(R.string.player_forward)) {
+                    VodChip(Icons.Filled.FastForward, stringResource(R.string.player_forward), forwardFocus) {
                         if (growingRec) seekRelative(15_000) else controller.seekForward(); interaction++
                     }
                     Spacer(Modifier.width(20.dp))
@@ -465,6 +601,22 @@ fun VodPlayerScreen(
                     VodChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio)) {
                         vodPanel = if (vodPanel == VodPanel.AUDIO) VodPanel.NONE else VodPanel.AUDIO
                         interaction++
+                    }
+                    if (showNextEpisodePrompt) {
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            stringResource(R.string.player_next_episode_in, formatDuration(nextEpisodeRemainingMs)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.75f),
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = ::playNextEpisode) {
+                            Text(stringResource(R.string.player_play_next))
+                        }
+                        TextButton(onClick = { nextEpisodeDismissed = true }) {
+                            Text(stringResource(R.string.player_dismiss_next))
+                        }
                     }
                 }
             }
@@ -478,6 +630,17 @@ fun VodPlayerScreen(
                 firstFocus = resumeFocus,
                 onResume = { showResume = false; begin(resumeMs) },
                 onStartOver = { showResume = false; begin(0L) },
+            )
+        }
+
+        if (showExternalSubtitleDialog) {
+            ExternalSubtitleDialog(
+                onLoaded = { uri, mimeType, label ->
+                    showExternalSubtitleDialog = false
+                    controller.setExternalSubtitle(uri, mimeType, label)
+                    reveal()
+                },
+                onDismiss = { showExternalSubtitleDialog = false },
             )
         }
     }
@@ -594,6 +757,7 @@ private fun TrackPanel(
     controller: PlayerController,
     tracks: Tracks,
     firstFocus: FocusRequester,
+    onAddExternalSubtitle: () -> Unit,
     onDone: () -> Unit,
 ) {
     val trackType = if (panel == VodPanel.SUBTITLES) C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
@@ -603,6 +767,7 @@ private fun TrackPanel(
     if (panel == VodPanel.SUBTITLES) {
         val anySelected = groups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
         options += Triple(stringResource(R.string.player_subtitles_off), !anySelected) { controller.disableText(); onDone() }
+        options += Triple(stringResource(R.string.player_add_external_subtitle), false, onAddExternalSubtitle)
     }
     groups.forEach { group ->
         for (i in 0 until group.length) {
@@ -637,6 +802,194 @@ private fun TrackPanel(
         }
     }
 }
+
+@Composable
+private fun ExternalSubtitleDialog(
+    onLoaded: (uri: Uri, mimeType: String, label: String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var urlInput by remember { mutableStateOf("") }
+    var urlError by remember { mutableStateOf<String?>(null) }
+    var fileError by remember { mutableStateOf<String?>(null) }
+    val unsupportedSubtitleMessage = stringResource(R.string.player_external_subtitle_unsupported)
+    val pickerUnavailableMessage = stringResource(R.string.player_subtitle_file_picker_unavailable)
+
+    // File picker — OpenDocument first, GetContent as fallback.
+    val handleUri: (Uri?) -> Unit = { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            val name = subtitleDisplayName(context, uri)
+            val mime = SubtitleUploadServer.subtitleMimeTypeForName(
+                name, context.contentResolver.getType(uri),
+            )
+            if (mime != null) {
+                val resolved = copySubtitleToCache(context, uri, name) ?: uri
+                onLoaded(resolved, mime, name?.substringBeforeLast('.'))
+                fileError = null
+            } else {
+                fileError = unsupportedSubtitleMessage
+            }
+        }
+    }
+    val mimeTypes = arrayOf("text/*", "application/x-subrip", "application/ttml+xml", "application/octet-stream")
+    val openDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument(), handleUri)
+    val getContentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { handleUri(it) }
+
+    fun launchPicker() {
+        val openDocIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+        }
+        when {
+            hasRealActivityHandler(context, openDocIntent) ->
+                try { openDocLauncher.launch(mimeTypes) } catch (_: ActivityNotFoundException) {
+                    val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                    }
+                    if (hasRealActivityHandler(context, getContentIntent)) {
+                        try {
+                            getContentLauncher.launch("*/*")
+                        } catch (_: ActivityNotFoundException) {
+                            fileError = pickerUnavailableMessage
+                        }
+                    } else {
+                        fileError = pickerUnavailableMessage
+                    }
+                }
+            hasRealActivityHandler(context, Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            }) -> try {
+                getContentLauncher.launch("*/*")
+            } catch (_: ActivityNotFoundException) {
+                fileError = pickerUnavailableMessage
+            }
+            else -> fileError = pickerUnavailableMessage
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .widthIn(max = 480.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(stringResource(R.string.player_add_external_subtitle), style = MaterialTheme.typography.titleLarge)
+
+            // File picker button
+            var pickFocused by remember { mutableStateOf(false) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (pickFocused) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primaryContainer,
+                    )
+                    .onFocusChanged { pickFocused = it.isFocused }
+                    .clickable { launchPicker() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                val tint = if (pickFocused) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onPrimaryContainer
+                Icon(
+                    androidx.compose.material.icons.Icons.Filled.FolderOpen,
+                    contentDescription = null,
+                    tint = tint,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.player_subtitle_browse_file),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = tint,
+                )
+            }
+            fileError?.let { error ->
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+
+            Text(
+                stringResource(R.string.player_external_subtitle_formats),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // URL input
+            OutlinedTextField(
+                value = urlInput,
+                onValueChange = { urlInput = it; urlError = null },
+                singleLine = true,
+                label = { Text(stringResource(R.string.player_external_subtitle_url_label)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            urlError?.let { err ->
+                Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                OutlinedButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
+                Spacer(Modifier.width(10.dp))
+                val unsupportedMsg = stringResource(R.string.player_external_subtitle_unsupported)
+                val invalidUrlMsg = stringResource(R.string.player_external_subtitle_url_invalid)
+                Button(
+                    onClick = {
+                        val trimmed = urlInput.trim()
+                        val parsed = runCatching { Uri.parse(trimmed) }.getOrNull()
+                        val scheme = parsed?.scheme?.lowercase(Locale.ROOT)
+                        if (parsed == null || scheme !in setOf("http", "https")) {
+                            urlError = invalidUrlMsg; return@Button
+                        }
+                        val mimeType = SubtitleUploadServer.subtitleMimeTypeForName(trimmed)
+                        if (mimeType == null) { urlError = unsupportedMsg; return@Button }
+                        val label = parsed.lastPathSegment?.substringBeforeLast('.')?.takeIf { it.isNotBlank() }
+                        onLoaded(parsed, mimeType, label)
+                    },
+                    enabled = urlInput.isNotBlank(),
+                ) { Text(stringResource(R.string.player_external_subtitle_load_url)) }
+            }
+        }
+    }
+}
+
+private fun hasRealActivityHandler(context: Context, intent: Intent): Boolean {
+    val matches = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+    return matches.any { info ->
+        val pkg = info.activityInfo?.packageName?.lowercase(Locale.ROOT).orEmpty()
+        val name = info.activityInfo?.name?.lowercase(Locale.ROOT).orEmpty()
+        pkg.isNotEmpty() &&
+            !pkg.contains("frameworkpackagestubs") &&
+            !pkg.contains("packagestubs") &&
+            !name.endsWith(".stubactivity") &&
+            !name.contains("unsupported")
+    }
+}
+
+private fun copySubtitleToCache(context: Context, uri: Uri, displayName: String?): Uri? {
+    if (uri.scheme != "content") return null
+    return runCatching {
+        val dir = File(context.cacheDir, "subtitles").apply { mkdirs() }
+        val safeName = SubtitleUploadServer.sanitizeSubtitleFileName(displayName ?: "subtitle.srt")
+        val target = File(dir, "picked_${System.currentTimeMillis()}_$safeName")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        Uri.fromFile(target)
+    }.getOrNull()
+}
+
+private fun subtitleDisplayName(context: Context, uri: Uri): String? =
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
 
 @Composable
 private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, focusRequester: FocusRequester?) {

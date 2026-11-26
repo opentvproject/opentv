@@ -6,6 +6,8 @@
 package app.opentv.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,14 +16,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +45,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -55,19 +65,30 @@ import app.opentv.data.work.SyncWorker
  * [AppSettings] and takes effect immediately.
  */
 @Composable
-fun AppSettingsScreen(onBack: () -> Unit) {
+fun AppSettingsScreen(
+    onBack: () -> Unit,
+    onOpenCategories: () -> Unit = {},
+) {
     val context = LocalContext.current
     val settings = remember { AppSettings.get(context) }
     val themeMode by settings.themeMode.collectAsState()
+    val colorTheme by settings.colorTheme.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
     val language by settings.languageTag.collectAsState()
+    val uiScale by settings.uiScale.collectAsState()
     val liveEnabled by settings.liveEnabled.collectAsState()
     val moviesEnabled by settings.moviesEnabled.collectAsState()
     val seriesEnabled by settings.seriesEnabled.collectAsState()
+    var languageExpanded by remember { mutableStateOf(false) }
+    val languageLabel = if (language.isBlank()) {
+        stringResource(R.string.settings_language_system)
+    } else {
+        OpenTvLanguages.firstOrNull { it.first == language }?.second ?: language
+    }
 
     // A refresh next to each content toggle kicks a full catalogue re-sync (which now honours the
     // toggles, so a type just switched on is fetched). Runs as background work so it isn't cut short
@@ -108,6 +129,40 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.settings_color_theme_title), style = MaterialTheme.typography.titleMedium)
+            ColorThemeOption(
+                stringResource(R.string.settings_color_theme_blue), Color(0xFF7C93FF),
+                colorTheme == AppSettings.ColorTheme.BLUE,
+            ) { settings.setColorTheme(AppSettings.ColorTheme.BLUE) }
+            ColorThemeOption(
+                stringResource(R.string.settings_color_theme_forest), Color(0xFF5F9870),
+                colorTheme == AppSettings.ColorTheme.FOREST,
+            ) { settings.setColorTheme(AppSettings.ColorTheme.FOREST) }
+            ColorThemeOption(
+                stringResource(R.string.settings_color_theme_amber), Color(0xFFC39134),
+                colorTheme == AppSettings.ColorTheme.AMBER,
+            ) { settings.setColorTheme(AppSettings.ColorTheme.AMBER) }
+            ColorThemeOption(
+                stringResource(R.string.settings_color_theme_rose), Color(0xFFB96873),
+                colorTheme == AppSettings.ColorTheme.ROSE,
+            ) { settings.setColorTheme(AppSettings.ColorTheme.ROSE) }
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.settings_ui_size_title), style = MaterialTheme.typography.titleMedium)
+            ThemeOption(stringResource(R.string.settings_ui_size_small), uiScale == AppSettings.UiScale.SMALL) {
+                settings.setUiScale(AppSettings.UiScale.SMALL)
+            }
+            ThemeOption(stringResource(R.string.settings_ui_size_recommended), uiScale == AppSettings.UiScale.RECOMMENDED) {
+                settings.setUiScale(AppSettings.UiScale.RECOMMENDED)
+            }
+            ThemeOption(stringResource(R.string.settings_ui_size_large), uiScale == AppSettings.UiScale.LARGE) {
+                settings.setUiScale(AppSettings.UiScale.LARGE)
+            }
+            Text(
+                stringResource(R.string.settings_ui_size_note),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -140,17 +195,51 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 onToggle = settings::setSeriesEnabled,
                 onRefresh = onRefreshContent,
             )
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onOpenCategories,
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
+            ) {
+                Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.settings_manage_categories_button))
+            }
         }
 
         Spacer(Modifier.height(16.dp))
 
         SettingsSection(stringResource(R.string.settings_section_language)) {
-            ThemeOption(stringResource(R.string.settings_language_system), language.isBlank()) {
-                changeLanguage(context, settings, "")
-            }
-            // Each language is listed in its own name (endonym), the convention users expect.
-            OpenTvLanguages.forEach { (tag, name) ->
-                ThemeOption(name, language == tag) { changeLanguage(context, settings, tag) }
+            Box(Modifier.fillMaxWidth().widthIn(max = 720.dp)) {
+                OutlinedButton(
+                    onClick = { languageExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(languageLabel, Modifier.weight(1f))
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(
+                    expanded = languageExpanded,
+                    onDismissRequest = { languageExpanded = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.settings_language_system)) },
+                        onClick = {
+                            languageExpanded = false
+                            changeLanguage(context, settings, "")
+                        },
+                    )
+                    // Keep each language in its own endonym, as users expect.
+                    OpenTvLanguages.forEach { (tag, name) ->
+                        DropdownMenuItem(
+                            text = { Text(name) },
+                            onClick = {
+                                languageExpanded = false
+                                changeLanguage(context, settings, tag)
+                            },
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(4.dp))
             Text(
@@ -387,6 +476,28 @@ private fun ThemeOption(label: String, selected: Boolean, onSelect: () -> Unit) 
     ) {
         RadioButton(selected = selected, onClick = onSelect)
         Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+@Composable
+private fun ColorThemeOption(label: String, swatch: Color, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onSelect)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier
+                .size(20.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(swatch),
+        )
+        Spacer(Modifier.width(10.dp))
         Text(label, style = MaterialTheme.typography.titleMedium)
     }
 }

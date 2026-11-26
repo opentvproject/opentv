@@ -6,6 +6,7 @@
 package app.opentv.player
 
 import android.content.Context
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -99,6 +100,7 @@ class PlayerController(
         data object Idle : State
         data class Buffering(val title: String) : State
         data class Playing(val title: String) : State
+        data object Ended : State
         /** Playback stopped and retries are exhausted. [message] is written for humans. */
         data class Error(val title: String, val message: String, val canRetry: Boolean) : State
     }
@@ -114,6 +116,9 @@ class PlayerController(
         val channelId: Long = 0,
         val sourceId: Long = 0,
         val groupKey: String = "",
+        val externalSubtitleUri: Uri? = null,
+        val externalSubtitleMimeType: String? = null,
+        val externalSubtitleLabel: String? = null,
     )
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -239,7 +244,7 @@ class PlayerController(
                             State.Playing(title)
                         }
                         Player.STATE_IDLE -> _state.value
-                        Player.STATE_ENDED -> State.Idle
+                        Player.STATE_ENDED -> State.Ended
                         else -> _state.value
                     }
                 }
@@ -302,6 +307,17 @@ class PlayerController(
                                 .build(),
                         )
                     }
+                    val subtitleUri = request.externalSubtitleUri
+                    val subtitleMimeType = request.externalSubtitleMimeType
+                    if (subtitleUri != null && subtitleMimeType != null) {
+                        val subtitle = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
+                            .setMimeType(subtitleMimeType)
+                            .setLanguage("und")
+                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                            .apply { request.externalSubtitleLabel?.let(::setLabel) }
+                            .build()
+                        setSubtitleConfigurations(listOf(subtitle))
+                    }
                 }
                 .build()
 
@@ -321,6 +337,24 @@ class PlayerController(
 
     fun retry() {
         current?.let { play(it, debounce = false) }
+    }
+
+    /** Adds an external subtitle and resumes the current VOD item from its current position. */
+    fun setExternalSubtitle(uri: Uri, mimeType: String, label: String?) {
+        val request = current ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .build()
+        play(
+            request.copy(
+                startPositionMillis = player.currentPosition.coerceAtLeast(0L),
+                externalSubtitleUri = uri,
+                externalSubtitleMimeType = mimeType,
+                externalSubtitleLabel = label,
+            ),
+            debounce = false,
+        )
     }
 
     /**

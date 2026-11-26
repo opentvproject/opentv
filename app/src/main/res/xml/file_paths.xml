@@ -9,4 +9,8 @@
     <cache-path
         name="updates"
         path="updates/" />
+    <!-- Where subtitle files picked from storage are copied for playback. -->
+    <cache-path
+        name="subtitles"
+        path="subtitles/" />
 </paths>

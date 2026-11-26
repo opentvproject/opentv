@@ -95,6 +95,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private data class GuidePreviewSession(
+    val scope: CoroutineScope,
+    val controller: PlayerController,
+)
+
 /**
  * Live TV: a category rail on the left, the channel list on the right.
  *
@@ -195,6 +200,13 @@ fun HomeScreen(
         }
     }
 
+    // If the currently selected category gets hidden in settings, return to All Channels.
+    LaunchedEffect(categories, selectedCategory) {
+        if (selectedCategory != null && categories.isNotEmpty() && categories.none { it.key == selectedCategory }) {
+            viewModel.selectCategory(null)
+        }
+    }
+
     // Keep both valid as the list changes (e.g. switching category): stay on the same channel if
     // it's still present, otherwise fall back to the top of the new list.
     LaunchedEffect(rows) {
@@ -206,15 +218,21 @@ fun HomeScreen(
     // One muted player, reused. It only ever decodes while the guide is the foreground screen,
     // and is stopped before any hand-off to full-screen, so the box never runs two decoders at
     // once — the thing that used to lock up cheap sticks.
-    val previewScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
-    val previewController = remember {
-        PlayerController(context, previewScope, graph.httpClient, subtitlesEnabled = false, preview = true)
-            .also { it.player.volume = 0f }
+    val previewSession = remember(previewEnabled) {
+        if (!previewEnabled) {
+            null
+        } else {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            val controller = PlayerController(context, scope, graph.httpClient, subtitlesEnabled = false, preview = true)
+                .also { it.player.volume = 0f }
+            GuidePreviewSession(scope, controller)
+        }
     }
-    DisposableEffect(Unit) {
+    val previewController = previewSession?.controller
+    DisposableEffect(previewSession) {
         onDispose {
-            previewController.release()
-            previewScope.cancel()
+            previewSession?.controller?.release()
+            previewSession?.scope?.cancel()
         }
     }
 
@@ -226,7 +244,7 @@ fun HomeScreen(
         PlaybackQueue.items = rows.map {
             PlaybackQueue.Item(it.primary.id, it.primary.shownName, it.primary.logoUrl, it.primary.number)
         }
-        previewController.stop()
+        previewController?.stop()
         onPlayChannel(channel)
     }
     fun requestLive(channel: Channel) {
@@ -241,7 +259,7 @@ fun HomeScreen(
                 Lifecycle.Event.ON_RESUME -> screenResumed = true
                 Lifecycle.Event.ON_PAUSE -> {
                     screenResumed = false
-                    previewController.stop()
+                    previewController?.stop()
                 }
                 else -> Unit
             }
@@ -264,7 +282,7 @@ fun HomeScreen(
 
     // Preview audio follows the setting; muted by default so browsing stays quiet.
     LaunchedEffect(previewSound) {
-        previewController.player.volume = if (previewSound) 1f else 0f
+        previewController?.player?.volume = if (previewSound) 1f else 0f
     }
 
     // Tune the preview to the highlighted channel, so it follows the d-pad as you browse — the
@@ -273,14 +291,15 @@ fun HomeScreen(
     // muted preview is still a second stream, which fights the recording and risks a provider ban.
     val recordingActive = activeRecordings.isNotEmpty()
     LaunchedEffect(highlightedRow?.key, previewEnabled, screenResumed, recordingActive) {
+        val player = previewController ?: return@LaunchedEffect
         val row = highlightedRow
         if (!previewEnabled || !screenResumed || recordingActive || row == null) {
-            previewController.stop()
+            player.stop()
             return@LaunchedEffect
         }
         val channel = row.primary
         val source = graph.sourceRepository.byId(channel.sourceId)
-        previewController.play(
+        player.play(
             PlayerController.Request(
                 url = channel.streamUrl,
                 title = channel.shownName,
@@ -423,7 +442,7 @@ fun HomeScreen(
                     onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
                     onRefresh = onRefresh,
                     onAddSource = onAddSource,
-                    previewPlayer = if (previewEnabled && !recordingActive) previewController.player else null,
+                    previewPlayer = if (previewEnabled && !recordingActive) previewController?.player else null,
                     isRecording = highlightedRow?.primary?.id?.let { id ->
                         activeRecordings.any { it.channelId == id }
                     } == true,

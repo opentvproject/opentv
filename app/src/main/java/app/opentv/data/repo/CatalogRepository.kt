@@ -160,15 +160,21 @@ class CatalogRepository(
 
     fun observeFavouriteChannels(): Flow<List<Channel>> = channelDao.observeFavourites()
 
+    fun observeFavouriteMovies(): Flow<List<Movie>> = movieDao.observeFavourites()
+
+    fun observeFavouriteSeries(): Flow<List<Series>> = seriesDao.observeFavourites()
+
     /** Reactive number of visible channels on disk — the UI uses this to tell "guide still
      * building" (channels exist) apart from "nothing loaded" (a failed or empty sync). */
     fun observeChannelCount(): Flow<Int> = channelDao.observeVisibleCount()
 
     fun observeCategories(kind: StreamKind): Flow<List<Category>> = categoryDao.observe(kind)
 
-    fun observeMovies(categoryId: String? = null): Flow<List<Movie>> = movieDao.observe(categoryId)
+    fun observeMovies(categoryId: String? = null, sourceId: Long? = null): Flow<List<Movie>> =
+        movieDao.observe(categoryId, sourceId)
 
-    fun observeSeries(categoryId: String? = null): Flow<List<Series>> = seriesDao.observe(categoryId)
+    fun observeSeries(categoryId: String? = null, sourceId: Long? = null): Flow<List<Series>> =
+        seriesDao.observe(categoryId, sourceId)
 
     fun observeEpisodes(sourceId: Long, seriesId: String): Flow<List<Episode>> =
         episodeDao.observeForSeries(sourceId, seriesId)
@@ -186,6 +192,11 @@ class CatalogRepository(
 
     suspend fun movie(id: Long): Movie? = movieDao.byId(id)
 
+    suspend fun moviesByIds(ids: List<Long>): Map<Long, Movie> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(500).flatMap { movieDao.byIds(it) }.associateBy { it.id }
+    }
+
     /**
      * The IMDb id for a film, for Stremio add-on stream lookups. Resolved through the user's TMDB
      * key (using the provider's TMDB id when present, else a title+year search). Null without a key
@@ -196,6 +207,31 @@ class CatalogRepository(
     }
 
     suspend fun episode(id: Long): Episode? = episodeDao.byId(id)
+
+    suspend fun episodesByIds(ids: List<Long>): Map<Long, Episode> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids.distinct().chunked(500).flatMap { episodeDao.byIds(it) }.associateBy { it.id }
+    }
+
+    suspend fun nextEpisode(episodeId: Long): Episode? {
+        val current = episodeDao.byId(episodeId) ?: return null
+        return episodeDao.nextForSeries(
+            current.sourceId,
+            current.seriesId,
+            current.season,
+            current.episodeNumber,
+        )
+    }
+
+    suspend fun seriesForEpisode(sourceId: Long, seriesId: String): Series? =
+        seriesDao.byProviderId(sourceId, seriesId)
+
+    suspend fun seriesForProviderIds(seriesIds: List<String>): Map<Pair<Long, String>, Series> {
+        if (seriesIds.isEmpty()) return emptyMap()
+        return seriesIds.distinct().chunked(500)
+            .flatMap { seriesDao.byProviderIds(it) }
+            .associateBy { it.sourceId to it.seriesId }
+    }
 
     suspend fun movieByStreamUrl(url: String): Movie? = movieDao.byStreamUrl(url)
 
