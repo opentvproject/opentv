@@ -117,6 +117,9 @@ fun VodPlayerScreen(
     userAgent: String,
     onBack: () -> Unit,
 ) {
+    // Full-screen video on a phone is watched sideways; rotation is handed back on the way out.
+    app.opentv.ui.LandscapeOnPhones()
+
     val context = LocalContext.current
     val view = LocalView.current
     val graph = remember { ServiceLocator.get(context) }

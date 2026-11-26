@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -165,22 +166,7 @@ fun MainScreen(
         )
     }
 
-    // The rail sits beside the content and pushes it, rather than floating over it. The Live TV
-    // screen has its own category rail down its left edge, and an overlaying menu would land on top
-    // of it and leave a sliver poking out — so they live side by side and never collide.
-    Column(Modifier.fillMaxSize()) {
-      Row(Modifier.weight(1f).fillMaxWidth()) {
-        NavRail(
-            tabs = visibleTabs,
-            current = tab,
-            onSelect = { tab = it },
-            onOpenSearch = onOpenSearch,
-            onOpenSettings = onOpenSettings,
-            onOpenProfiles = onOpenProfiles,
-            activeProfileName = activeProfileName,
-        )
-
-        Box(Modifier.weight(1f).fillMaxHeight()) {
+    val tabContent: @Composable () -> Unit = {
             when (tab) {
                 Tab.LIVE -> HomeScreen(
                     isTelevision = isTelevision,
@@ -207,7 +193,42 @@ fun MainScreen(
                 )
                 Tab.LIBRARY -> LibraryScreen(onPlay = onPlayDownload, onPlayRecording = onPlayRecording)
             }
+    }
+
+    // A phone held upright: no room for a side rail next to the content, so the tabs move to a
+    // bar along the bottom and Search / profile / Settings to a slim bar along the top.
+    if (isCompactWidth()) {
+        Column(Modifier.fillMaxSize()) {
+            CompactTopBar(
+                title = stringResource(tab.labelRes),
+                activeProfileName = activeProfileName,
+                onOpenSearch = onOpenSearch,
+                onOpenProfiles = onOpenProfiles,
+                onOpenSettings = onOpenSettings,
+            )
+            Box(Modifier.weight(1f).fillMaxWidth()) { tabContent() }
+            StatusBar()
+            CompactTabBar(tabs = visibleTabs, current = tab, onSelect = { tab = it })
         }
+        return
+    }
+
+    // The rail sits beside the content and pushes it, rather than floating over it. The Live TV
+    // screen has its own category rail down its left edge, and an overlaying menu would land on top
+    // of it and leave a sliver poking out — so they live side by side and never collide.
+    Column(Modifier.fillMaxSize()) {
+      Row(Modifier.weight(1f).fillMaxWidth()) {
+        NavRail(
+            tabs = visibleTabs,
+            current = tab,
+            onSelect = { tab = it },
+            onOpenSearch = onOpenSearch,
+            onOpenSettings = onOpenSettings,
+            onOpenProfiles = onOpenProfiles,
+            activeProfileName = activeProfileName,
+        )
+
+        Box(Modifier.weight(1f).fillMaxHeight()) { tabContent() }
       }
       StatusBar()
     }
@@ -258,6 +279,84 @@ private fun StatusBar() {
                 modifier = Modifier.fillMaxWidth().height(3.dp),
                 color = MaterialTheme.colorScheme.primary,
             )
+        }
+    }
+}
+
+/** The portrait top bar: which tab you are on, and the three things the rail keeps at its foot. */
+@Composable
+private fun CompactTopBar(
+    title: String,
+    activeProfileName: String,
+    onOpenSearch: () -> Unit,
+    onOpenProfiles: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_opentv_logo),
+            contentDescription = "OpenTV",
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onOpenSearch) {
+            Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.nav_search))
+        }
+        IconButton(onClick = onOpenProfiles) {
+            Icon(Icons.Filled.Person, contentDescription = activeProfileName)
+        }
+        IconButton(onClick = onOpenSettings) {
+            Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.nav_settings))
+        }
+    }
+}
+
+/** The portrait tab bar: the same tabs as the rail, as icon-over-label buttons along the bottom. */
+@Composable
+private fun CompactTabBar(tabs: List<Tab>, current: Tab, onSelect: (Tab) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    ) {
+        tabs.forEach { t ->
+            val selected = t == current
+            val tint = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onSelect(t) }
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(t.icon, contentDescription = null, tint = tint)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    stringResource(t.labelRes),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = tint,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

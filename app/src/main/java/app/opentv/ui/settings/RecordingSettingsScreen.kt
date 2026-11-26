@@ -192,6 +192,12 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
         SectionCard(stringResource(R.string.recset_save_to)) {
+            Text(
+                stringResource(R.string.recset_downloads_too),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
             TargetRow(
                 label = stringResource(R.string.recset_internal_label),
                 subtitle = RecordingStorage.internalDir(context).absolutePath,

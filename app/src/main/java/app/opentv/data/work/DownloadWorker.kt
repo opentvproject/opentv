@@ -80,6 +80,9 @@ class DownloadWorker(
                     total += read
                     if (total - lastReport >= REPORT_BYTES) {
                         lastReport = total
+                        // Deleted from the Library mid-transfer: stop, rather than fill the drive
+                        // with a file nothing points at any more.
+                        if (repo.byId(id) == null) throw java.io.IOException("Download removed")
                         repo.setProgress(id, total, maxOf(contentLength, total))
                         val pct = if (contentLength > 0) ((total * 100L) / contentLength).toInt() else 0
                         runCatching { setForeground(foregroundInfo(download.title, pct)) }
@@ -155,9 +158,14 @@ class DownloadWorker(
         private const val CHANNEL_ID = "downloads"
         private const val NOTIF_ID = 4310
         private const val BUFFER_BYTES = 64 * 1024
+        private const val QUEUE_NAME = "opentv-downloads"
         private const val REPORT_BYTES = 2L * 1024 * 1024
 
-        /** Enqueue the transfer for [downloadId]. Unique per download, so a re-tap won't double it. */
+        /**
+         * Enqueue the transfer for [downloadId] behind any already waiting. One at a time on purpose:
+         * a whole season queued at once would otherwise open a connection per episode, and most
+         * providers allow one or two. A re-tap can't double up — [Downloads.start] is idempotent.
+         */
         fun enqueue(context: Context, downloadId: Long) {
             val request = OneTimeWorkRequestBuilder<DownloadWorker>()
                 .setInputData(workDataOf(KEY_ID to downloadId))
@@ -166,8 +174,8 @@ class DownloadWorker(
                 )
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "opentv-download-$downloadId",
-                ExistingWorkPolicy.KEEP,
+                QUEUE_NAME,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request,
             )
         }

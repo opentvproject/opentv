@@ -326,6 +326,16 @@ object SmbClient {
         }
     }
 
+    /** Free bytes on the share, for sizing up a download before it starts. Throws when unreachable. */
+    fun freeSpace(config: SmbConfig): Long {
+        val q = connect(config)
+        try {
+            return q.share.shareInformation.freeSpace
+        } finally {
+            closeQuad(q)
+        }
+    }
+
     /** Prove the settings work: connect, authenticate, open the share. Throws on failure. */
     fun test(config: SmbConfig) {
         val q = connect(config)

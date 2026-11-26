@@ -97,6 +97,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!--
+              opentv://search?q=… opens Search with the text already typed, so a voice-search
+              bridge or assistant routine can hand a spoken query to OpenTV (see core/DeepLinks.kt).
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="opentv" android:host="search" />
+            </intent-filter>
         </activity>
 
         <service

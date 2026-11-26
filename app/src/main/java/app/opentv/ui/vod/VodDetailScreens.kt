@@ -8,6 +8,8 @@ package app.opentv.ui.vod
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -55,6 +58,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,7 +70,12 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
 import app.opentv.data.model.StremioStream
 import app.opentv.data.parser.displayTitle
+import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.filled.Folder
+import app.opentv.core.AppSettings
+import app.opentv.data.work.DownloadSizes
 import app.opentv.data.work.Downloads
+import app.opentv.ui.isCompactWidth
 import app.opentv.ui.VodViewModel
 import coil.compose.AsyncImage
 import androidx.compose.ui.window.Dialog
@@ -84,7 +93,8 @@ fun MovieDetailScreen(
     movieId: Long,
     onPlay: (Movie) -> Unit,
     onPlayUrl: (key: String, url: String, title: String) -> Unit,
-    onDownload: (Movie) -> Unit,
+    onDownload: (movie: Movie, copy: Movie) -> Unit,
+    onStorageSettings: () -> Unit,
     onOpenMovie: (Movie) -> Unit,
     onOpenPerson: (String) -> Unit,
     viewModel: VodViewModel = viewModel(),
@@ -99,6 +109,7 @@ fun MovieDetailScreen(
     var addonStreams by remember(movieId) { mutableStateOf<List<StremioStream>?>(null) }
     var addonLoading by remember(movieId) { mutableStateOf(false) }
     val downloadState by viewModel.downloadFlow("movie:$movieId").collectAsState(initial = null)
+    var downloadPicker by remember(movieId) { mutableStateOf(false) }
 
     LaunchedEffect(movieId) {
         val loaded = viewModel.movieDetail(movieId)
@@ -110,6 +121,16 @@ fun MovieDetailScreen(
     }
 
     val m = movie ?: run { LoadingDetail(); return }
+
+    if (downloadPicker) {
+        MovieDownloadDialog(
+            movie = m,
+            viewModel = viewModel,
+            onPick = { copy -> downloadPicker = false; onDownload(m, copy) },
+            onStorageSettings = { downloadPicker = false; onStorageSettings() },
+            onDismiss = { downloadPicker = false },
+        )
+    }
 
     // Land focus on the primary action once the page is up, so a d-pad has somewhere to be.
     LaunchedEffect(m.id) {
@@ -147,7 +168,7 @@ fun MovieDetailScreen(
                         dl?.status == DownloadStatus.COMPLETED ->
                             onPlayUrl("movie:${m.id}", Downloads.playbackUrl(dl.filePath), m.displayTitle)
                         dl?.status == DownloadStatus.DOWNLOADING || dl?.status == DownloadStatus.QUEUED -> Unit
-                        else -> onDownload(m)
+                        else -> downloadPicker = true
                     }
                 }
                 DetailButton(
@@ -217,7 +238,7 @@ private fun AddonStreamPicker(
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
-                .width(560.dp)
+                .fillMaxWidth().widthIn(max = 560.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(20.dp),
@@ -291,6 +312,7 @@ private fun AddonStreamRow(stream: StremioStream, onPick: (StremioStream) -> Uni
 fun SeriesDetailScreen(
     seriesId: Long,
     onPlayEpisode: (mediaKey: String, url: String, title: String) -> Unit,
+    onStorageSettings: () -> Unit,
     onOpenSeries: (Series) -> Unit,
     onOpenPerson: (String) -> Unit,
     viewModel: VodViewModel = viewModel(),
@@ -325,6 +347,23 @@ fun SeriesDetailScreen(
         episodes.groupBy { it.season }
             .mapValues { (_, eps) -> eps.sortedBy { it.episodeNumber } }
             .toSortedMap()
+    }
+
+    var seasonToDownload by remember(s.id) { mutableStateOf<Int?>(null) }
+    val downloads by viewModel.downloadsByKey().collectAsState(initial = emptyMap())
+    seasonToDownload?.let { season ->
+        // Only what isn't already in the Library (or on its way there) is counted and queued.
+        val eps = seasons[season].orEmpty().filter { ep ->
+            downloads["ep:${ep.id}"].let { it == null || it.status == DownloadStatus.FAILED }
+        }
+        SeasonDownloadDialog(
+            season = season,
+            episodes = eps,
+            viewModel = viewModel,
+            onConfirm = { seasonToDownload = null; viewModel.downloadSeason(eps, s) },
+            onStorageSettings = { seasonToDownload = null; onStorageSettings() },
+            onDismiss = { seasonToDownload = null },
+        )
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
@@ -363,10 +402,15 @@ fun SeriesDetailScreen(
             seasons.forEach { (season, eps) ->
                 item(key = "season:$season") {
                     Spacer(Modifier.height(8.dp))
-                    SectionHeader(stringResource(R.string.vod_season, season))
+                    // Beside the heading rather than at the far edge: a remote's Up/Down only finds
+                    // it when it sits in line with the episode rows and the chips above.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SectionHeader(stringResource(R.string.vod_season, season))
+                        SeasonDownloadButton { seasonToDownload = season }
+                    }
                 }
                 items(eps, key = { it.id }) { ep ->
-                    EpisodeRow(ep, onPlayEpisode) { viewModel.downloadEpisode(ep, s) }
+                    EpisodeRow(ep, downloads["ep:${ep.id}"]?.status, onPlayEpisode) { viewModel.downloadEpisode(ep, s) }
                 }
             }
         }
@@ -433,6 +477,44 @@ private fun DetailBackdrop(
                 ),
             ),
         )
+        // A phone held upright can't fit the buttons beside the poster: they drop to their own
+        // row underneath, which scrolls sideways if there are more than fit.
+        if (isCompactWidth()) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    HeroPosterCard(posterUrl = posterUrl, title = title)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (meta.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(meta, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = actions,
+                )
+            }
+            return@Box
+        }
         Row(
             Modifier
                 .align(Alignment.BottomStart)
@@ -682,6 +764,7 @@ private fun DetailButton(
 @Composable
 private fun EpisodeRow(
     ep: Episode,
+    downloadStatus: DownloadStatus?,
     onPlay: (mediaKey: String, url: String, title: String) -> Unit,
     onDownload: (Episode) -> Unit,
 ) {
@@ -720,13 +803,222 @@ private fun EpisodeRow(
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        EpisodeDownloadButton { onDownload(ep) }
+        EpisodeDownloadButton(downloadStatus) { onDownload(ep) }
+    }
+}
+
+/** "Download season" beside a season's heading: queues every episode in it after a confirmation. */
+@Composable
+private fun SeasonDownloadButton(onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val bg = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Download, contentDescription = null, tint = fg, modifier = Modifier.height(18.dp).width(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.vod_download_season), style = MaterialTheme.typography.labelLarge, color = fg)
+    }
+}
+
+/**
+ * Asked before a film downloads: which of the provider's copies to take (when it lists the film in
+ * more than one quality) and how big each is, with the free space it has to fit in. The sizes are
+ * the provider's real file sizes; a provider that won't report one still downloads fine.
+ */
+@Composable
+private fun MovieDownloadDialog(
+    movie: Movie,
+    viewModel: VodViewModel,
+    onPick: (Movie) -> Unit,
+    onStorageSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options by remember(movie.id) { viewModel.downloadOptions(movie) }
+        .collectAsState(initial = listOf(VodViewModel.DownloadOption(movie, "", null)))
+    var settled by remember(movie.id) { mutableStateOf(false) }
+    val free by produceState<Long?>(null) { value = viewModel.downloadFreeSpace() }
+    // "Checking…" only for a moment: a provider that never answers shouldn't look busy forever.
+    LaunchedEffect(movie.id) { delay(12_000); settled = true }
+
+    DownloadDialogFrame(stringResource(R.string.vod_download_title, movie.displayTitle), onDismiss) {
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+        options.forEachIndexed { index, option ->
+            val size = option.sizeBytes
+            val room = free
+            DownloadChoiceRow(
+                title = option.qualityLabel.ifBlank { stringResource(R.string.vod_download_original) },
+                subtitle = when {
+                    size != null && room != null && size > room ->
+                        stringResource(R.string.vod_download_too_big, DownloadSizes.format(size))
+                    size != null -> DownloadSizes.format(size)
+                    settled -> stringResource(R.string.vod_download_size_unknown)
+                    else -> stringResource(R.string.vod_download_checking)
+                },
+                modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
+            ) { onPick(option.movie) }
+            Spacer(Modifier.height(4.dp))
+        }
+        DownloadStorageRow(viewModel, free, onStorageSettings)
+        DownloadFootnote(stringResource(R.string.vod_download_note))
+    }
+}
+
+/** Confirms a whole-season download, with the episode count and a size estimate from one episode. */
+@Composable
+private fun SeasonDownloadDialog(
+    season: Int,
+    episodes: List<Episode>,
+    viewModel: VodViewModel,
+    onConfirm: () -> Unit,
+    onStorageSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var estimate by remember(season) { mutableStateOf<Long?>(null) }
+    val free by produceState<Long?>(null) { value = viewModel.downloadFreeSpace() }
+    LaunchedEffect(season, episodes.size) {
+        estimate = viewModel.seasonSizeEstimate(episodes)
+    }
+
+    DownloadDialogFrame(stringResource(R.string.vod_download_season_title, season), onDismiss) {
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+        val size = estimate
+        val room = free
+        if (episodes.isEmpty()) {
+            DownloadChoiceRow(
+                title = stringResource(R.string.vod_download_season_done),
+                subtitle = null,
+                icon = Icons.Filled.DownloadDone,
+                modifier = Modifier.focusRequester(first),
+                onClick = onDismiss,
+            )
+            DownloadStorageRow(viewModel, free, onStorageSettings)
+            return@DownloadDialogFrame
+        }
+        DownloadChoiceRow(
+            title = stringResource(R.string.vod_download_season_confirm),
+            subtitle = when {
+                size != null && room != null && size > room ->
+                    pluralStringResource(R.plurals.vod_download_season_too_big_n, episodes.size, episodes.size, DownloadSizes.format(size))
+                size != null ->
+                    pluralStringResource(R.plurals.vod_download_season_size_n, episodes.size, episodes.size, DownloadSizes.format(size))
+                else -> pluralStringResource(R.plurals.vod_download_season_count_n, episodes.size, episodes.size)
+            },
+            modifier = Modifier.focusRequester(first),
+            onClick = onConfirm,
+        )
+        Spacer(Modifier.height(4.dp))
+        DownloadChoiceRow(
+            title = stringResource(R.string.common_cancel),
+            subtitle = null,
+            icon = null,
+            onClick = onDismiss,
+        )
+        DownloadStorageRow(viewModel, free, onStorageSettings)
+        DownloadFootnote(stringResource(R.string.vod_download_season_note))
+    }
+}
+
+@Composable
+private fun DownloadDialogFrame(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth().widthIn(max = 480.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(20.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+/**
+ * Where the download will be saved and how much room is there; selecting it opens the storage
+ * settings, where this device, a USB drive or a NAS share can be chosen instead.
+ */
+@Composable
+private fun DownloadStorageRow(viewModel: VodViewModel, freeBytes: Long?, onChange: () -> Unit) {
+    val destination = remember { viewModel.downloadDestination() }
+    val place = when (destination.target) {
+        AppSettings.RecordingTarget.INTERNAL -> stringResource(R.string.vod_download_to_device)
+        AppSettings.RecordingTarget.SMB -> stringResource(R.string.vod_download_to_nas, destination.name)
+        AppSettings.RecordingTarget.USB -> stringResource(R.string.vod_download_to_usb, destination.name)
+    }.trim()
+    Spacer(Modifier.height(4.dp))
+    DownloadChoiceRow(
+        title = stringResource(R.string.vod_download_saving_to, place),
+        subtitle = listOfNotNull(
+            freeBytes?.let { stringResource(R.string.vod_download_free, DownloadSizes.format(it)) },
+            stringResource(R.string.vod_download_change_storage),
+        ).joinToString(" · "),
+        icon = Icons.Filled.Folder,
+        onClick = onChange,
+    )
+}
+
+@Composable
+private fun DownloadFootnote(note: String) {
+    Spacer(Modifier.height(8.dp))
+    Text(
+        note,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun DownloadChoiceRow(
+    title: String,
+    subtitle: String?,
+    modifier: Modifier = Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = Icons.Filled.Download,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (focused) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
 /** A trailing "download this episode" affordance; the row itself still plays on click. */
 @Composable
-private fun EpisodeDownloadButton(onClick: () -> Unit) {
+private fun EpisodeDownloadButton(status: DownloadStatus?, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val bg = if (focused) MaterialTheme.colorScheme.primary else Color.Transparent
     val fg = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -738,7 +1030,12 @@ private fun EpisodeDownloadButton(onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
-        Icon(Icons.Filled.Download, contentDescription = stringResource(R.string.vod_download), tint = fg)
+        val (icon, label) = when (status) {
+            DownloadStatus.COMPLETED -> Icons.Filled.DownloadDone to R.string.vod_downloaded
+            DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED -> Icons.Filled.Downloading to R.string.vod_download_queued
+            else -> Icons.Filled.Download to R.string.vod_download
+        }
+        Icon(icon, contentDescription = stringResource(label), tint = fg)
     }
 }
 
