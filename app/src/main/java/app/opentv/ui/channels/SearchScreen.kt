@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.core.DeepLinks
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
@@ -55,6 +57,7 @@ import app.opentv.data.model.shownName
 import app.opentv.data.parser.displayTitle
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.VodViewModel
+import app.opentv.ui.isCompactWidth
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -73,10 +76,12 @@ fun SearchScreen(
     onPlayMovie: (Movie) -> Unit,
     onOpenSeries: (Series) -> Unit,
     onBack: () -> Unit,
+    initialQuery: String = "",
     viewModel: ChannelsViewModel = viewModel(),
     vodViewModel: VodViewModel = viewModel(),
 ) {
-    var query by remember { mutableStateOf("") }
+    // Starts with whatever a deep link (opentv://search?q=…) asked for; empty otherwise.
+    var query by remember(initialQuery) { mutableStateOf(initialQuery) }
     val channelResults by viewModel.searchResults.collectAsState()
     val movieResults by vodViewModel.movieResults.collectAsState()
     val seriesResults by vodViewModel.seriesResults.collectAsState()
@@ -87,6 +92,67 @@ fun SearchScreen(
         vodViewModel.setVodSearchQuery(query)
     }
     BackHandler { onBack() }
+
+    val results: @Composable () -> Unit = {
+        when {
+            query.isBlank() -> Hint(stringResource(R.string.search_start_hint))
+            query.trim().length < 2 -> Hint(stringResource(R.string.common_keep_typing))
+            !anyResults -> Hint(stringResource(R.string.search_no_results, query))
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (channelResults.isNotEmpty()) {
+                    item { SectionHeader(stringResource(R.string.common_channels)) }
+                    items(channelResults, key = { "c${it.key}" }) { row ->
+                        SearchResultRow(row = row, onClick = { onPlayChannel(row.primary) })
+                    }
+                }
+                if (movieResults.isNotEmpty()) {
+                    item { SectionHeader(stringResource(R.string.nav_movies)) }
+                    items(movieResults, key = { "m${it.id}" }) { movie ->
+                        VodResultRow(movie.displayTitle, movie.posterUrl, movie.year?.toString()) {
+                            onPlayMovie(movie)
+                        }
+                    }
+                }
+                if (seriesResults.isNotEmpty()) {
+                    item { SectionHeader(stringResource(R.string.nav_shows)) }
+                    items(seriesResults, key = { "s${it.id}" }) { show ->
+                        VodResultRow(show.displayTitle, show.posterUrl, show.year?.toString()) {
+                            onOpenSeries(show)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // A phone held upright has a real keyboard and no room for a d-pad one beside the results:
+    // an ordinary text field on top, results underneath.
+    if (isCompactWidth()) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.nav_search),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
+            }
+            Spacer(Modifier.height(12.dp))
+            // Open ready to type; a search that arrived with its query already has what it needs.
+            val fieldFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { if (initialQuery.isBlank()) runCatching { fieldFocus.requestFocus() } }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it.take(DeepLinks.MAX_QUERY) },
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.search_type_name)) },
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.weight(1f).fillMaxWidth()) { results() }
+        }
+        return
+    }
 
     Column(
         Modifier
@@ -101,8 +167,11 @@ fun SearchScreen(
                 style = MaterialTheme.typography.titleLarge,
                 color = if (query.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
                 else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
             OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
         }
 
@@ -118,37 +187,7 @@ fun SearchScreen(
 
             Spacer(Modifier.width(28.dp))
 
-            Column(Modifier.weight(1f).fillMaxSize()) {
-                when {
-                    query.isBlank() -> Hint(stringResource(R.string.search_start_hint))
-                    query.trim().length < 2 -> Hint(stringResource(R.string.common_keep_typing))
-                    !anyResults -> Hint(stringResource(R.string.search_no_results, query))
-                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (channelResults.isNotEmpty()) {
-                            item { SectionHeader(stringResource(R.string.common_channels)) }
-                            items(channelResults, key = { "c${it.key}" }) { row ->
-                                SearchResultRow(row = row, onClick = { onPlayChannel(row.primary) })
-                            }
-                        }
-                        if (movieResults.isNotEmpty()) {
-                            item { SectionHeader(stringResource(R.string.nav_movies)) }
-                            items(movieResults, key = { "m${it.id}" }) { movie ->
-                                VodResultRow(movie.displayTitle, movie.posterUrl, movie.year?.toString()) {
-                                    onPlayMovie(movie)
-                                }
-                            }
-                        }
-                        if (seriesResults.isNotEmpty()) {
-                            item { SectionHeader(stringResource(R.string.nav_shows)) }
-                            items(seriesResults, key = { "s${it.id}" }) { show ->
-                                VodResultRow(show.displayTitle, show.posterUrl, show.year?.toString()) {
-                                    onOpenSeries(show)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Column(Modifier.weight(1f).fillMaxSize()) { results() }
         }
     }
 }

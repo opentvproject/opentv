@@ -26,6 +26,38 @@
     <string name="vod_download_queued">Queued…</string>
     <string name="vod_downloaded">Downloaded</string>
     <string name="vod_download_retry">Retry</string>
+    <string name="vod_download_title">Download %1$s</string>
+    <string name="vod_download_checking">Checking file size…</string>
+    <string name="vod_download_original">Original quality</string>
+    <string name="vod_download_too_big">%1$s · more than the free space</string>
+    <string name="vod_download_size_unknown">Size not reported by your provider</string>
+    <string name="vod_download_free">%1$s free</string>
+    <string name="vod_download_saving_to">Saving to %1$s</string>
+    <string name="vod_download_to_device">this device</string>
+    <string name="vod_download_to_nas">NAS %1$s</string>
+    <string name="vod_download_to_usb">USB drive %1$s</string>
+    <string name="vod_download_change_storage">select to change</string>
+    <string name="vod_download_season_too_big">%1$d episodes · about %2$s · more than the free space</string>
+    <string name="vod_download_note">Saved exactly as your provider supplies it, including its audio and subtitle tracks.</string>
+    <string name="vod_download_season">Download season</string>
+    <string name="vod_download_season_title">Download Season %1$d?</string>
+    <string name="vod_download_season_count">%1$d episodes</string>
+    <string name="vod_download_season_size">%1$d episodes · about %2$s</string>
+    <string name="vod_download_season_done">Already in your Library</string>
+    <plurals name="vod_download_season_count_n">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <plurals name="vod_download_season_size_n">
+        <item quantity="one">%1$d episode · about %2$s</item>
+        <item quantity="other">%1$d episodes · about %2$s</item>
+    </plurals>
+    <plurals name="vod_download_season_too_big_n">
+        <item quantity="one">%1$d episode · about %2$s · more than the free space</item>
+        <item quantity="other">%1$d episodes · about %2$s · more than the free space</item>
+    </plurals>
+    <string name="vod_download_season_confirm">Download all</string>
+    <string name="vod_download_season_note">Episodes download one at a time. Any already in your Library are skipped.</string>
     <string name="vod_start_over">Start from beginning</string>
     <string name="vod_resume_at">You stopped at %1$s</string>
 
@@ -184,7 +216,7 @@
     <string name="settings_display_title">Display &amp; playback</string>
     <string name="settings_display_subtitle">Theme, subtitles, live guide preview</string>
     <string name="settings_recording_title">Recording</string>
-    <string name="settings_recording_subtitle">Where recordings are saved — this box or a NAS</string>
+    <string name="settings_recording_subtitle">Where recordings and downloads are saved — this device, a USB drive or a NAS</string>
     <string name="settings_parental_title">Parental controls</string>
     <string name="settings_parental_subtitle">PIN lock and hide adult categories</string>
     <string name="settings_sync_title">Sync watch history</string>
@@ -272,6 +304,7 @@
     <!-- ============================ Recording settings ============================ -->
     <string name="recset_desc">Choose where recordings are saved. Internal keeps them on this device; a USB drive stores them on removable storage; NAS saves them to a shared folder on your network. All still play back here.</string>
     <string name="recset_save_to">Save recordings to</string>
+    <string name="recset_downloads_too">Films and episodes you download are saved to the same place.</string>
     <string name="recset_internal_label">This device (internal storage)</string>
     <string name="recset_smb_label">NAS / network share (SMB)</string>
     <string name="recset_smb_subtitle">Synology, a shared Windows folder, or any SMB2/3 server</string>

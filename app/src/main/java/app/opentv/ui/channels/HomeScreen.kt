@@ -24,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import app.opentv.ui.isCompactWidth
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -120,7 +122,12 @@ fun HomeScreen(
     val context = LocalContext.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
-    val previewEnabled by settings.guidePreviewVideo.collectAsState()
+    val previewSetting by settings.guidePreviewVideo.collectAsState()
+    // A phone held upright gets a single-column layout: categories as a strip of chips, channels
+    // as a list, tap to watch. No preview pane there — it has nowhere to go, and a preview is a
+    // second stream a phone on mobile data should not be opening unasked.
+    val compact = isCompactWidth()
+    val previewEnabled = previewSetting && !compact
     val channelLayout by settings.channelLayout.collectAsState()
 
     val categories by viewModel.visibleCategoryGroups.collectAsState()
@@ -296,7 +303,7 @@ fun HomeScreen(
         // ---- Category rail -----------------------------------------------------------------
         // Width animates to 0 while focus is in the guide (see onFocusRow) so the grid gets the
         // whole screen; d-pad LEFT from the guide's channel column slides it back (onExitLeft…).
-        Column(
+        if (!compact) Column(
             Modifier
                 .width(railWidth)
                 .fillMaxHeight()
@@ -376,6 +383,18 @@ fun HomeScreen(
 
         // ---- Preview + guide ---------------------------------------------------------------
         Column(Modifier.weight(1f)) {
+            if (compact) {
+                CompactCategoryBar(
+                    sources = sources,
+                    selectedSource = selectedSource,
+                    onSelectSource = viewModel::selectSource,
+                    categories = categories,
+                    favouritesOnly = favouritesOnly,
+                    selectedCategory = selectedCategory,
+                    onFavourites = viewModel::selectFavourites,
+                    onCategory = viewModel::selectCategory,
+                )
+            }
             if (rows.isEmpty()) {
                 when {
                     favouritesOnly -> NoFavouritesState()
@@ -417,7 +436,7 @@ fun HomeScreen(
                         SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
                     }
                 }
-                GuidePreview(
+                if (!compact) GuidePreview(
                     row = highlightedRow,
                     nowMillis = nowMillis,
                     onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
@@ -448,7 +467,18 @@ fun HomeScreen(
                         false
                     }
                 }
-                if (channelLayout == AppSettings.ChannelLayout.LIST) {
+                if (compact) {
+                    // Touch: a tap watches, a long press opens the same menu OK does on a remote.
+                    ChannelList(
+                        rows = rows,
+                        selectedKey = null,
+                        onSelectRow = { row -> goFullscreen(row.primary) },
+                        onLongPressRow = { row -> channelMenu = row },
+                        onFocusRow = { highlightedRow = it },
+                        onToggleFavourite = { viewModel.toggleFavourite(it) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                } else if (channelLayout == AppSettings.ChannelLayout.LIST) {
                     ChannelList(
                         rows = rows,
                         selectedKey = highlightedRow?.key,
@@ -501,7 +531,8 @@ fun HomeScreen(
         Dialog(onDismissRequest = { recordTarget = null }) {
             Column(
                 Modifier
-                    .width(440.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 440.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(24.dp),
@@ -655,7 +686,8 @@ fun HomeScreen(
         Dialog(onDismissRequest = { pendingLiveChannel = null }) {
             Column(
                 Modifier
-                    .width(480.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 480.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp),
@@ -693,7 +725,8 @@ fun HomeScreen(
         Dialog(onDismissRequest = { channelMenu = null }) {
             Column(
                 Modifier
-                    .width(480.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 480.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp),
@@ -825,6 +858,56 @@ private suspend fun setReminder(
         ),
     )
     ReminderScheduler.set(context, id, programme.startUtcMillis)
+}
+
+/**
+ * The category rail, laid on its side for a narrow screen: provider chips (only with more than
+ * one provider) over a strip of Favourites / All channels / each category.
+ */
+@Composable
+private fun CompactCategoryBar(
+    sources: List<app.opentv.data.model.Source>,
+    selectedSource: Long?,
+    onSelectSource: (Long?) -> Unit,
+    categories: List<ChannelsViewModel.CategoryGroup>,
+    favouritesOnly: Boolean,
+    selectedCategory: String?,
+    onFavourites: () -> Unit,
+    onCategory: (String?) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        if (sources.size > 1) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item(key = "src-all") {
+                    QualityChip(stringResource(R.string.channels_manager_all_sources), selectedSource == null) {
+                        onSelectSource(null)
+                    }
+                }
+                items(sources, key = { "src-${it.id}" }) { source ->
+                    QualityChip(source.name, selectedSource == source.id) { onSelectSource(source.id) }
+                }
+            }
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "fav") {
+                QualityChip(stringResource(R.string.guide_favourites), favouritesOnly, onFavourites)
+            }
+            item(key = "all") {
+                QualityChip(stringResource(R.string.guide_all_channels), !favouritesOnly && selectedCategory == null) {
+                    onCategory(null)
+                }
+            }
+            items(categories, key = { it.key }) { group ->
+                QualityChip(group.label, !favouritesOnly && selectedCategory == group.key) { onCategory(group.key) }
+            }
+        }
+    }
 }
 
 @Composable

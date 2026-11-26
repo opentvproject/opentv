@@ -51,6 +51,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -112,7 +115,18 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    OpenTvApp(isTelevision = isTelevision)
+                    // The wide layout draws edge to edge and pads its own rail. The narrow
+                    // (portrait phone) one keeps everything clear of the status bar, the gesture
+                    // bar and the keyboard in one place, here.
+                    Box(
+                        if (app.opentv.ui.isCompactWidth()) {
+                            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+                        } else {
+                            Modifier.fillMaxSize()
+                        },
+                    ) {
+                        OpenTvApp(isTelevision = isTelevision)
+                    }
                 }
             }
         }
@@ -129,6 +143,11 @@ class MainActivity : ComponentActivity() {
     private fun handlePlayIntent(intent: Intent?) {
         val id = intent?.getLongExtra(EXTRA_PLAY_CHANNEL, 0L) ?: 0L
         if (id != 0L) app.opentv.core.PlayRequests.request(id)
+        // opentv://search?q=… — a voice-search bridge handing over a spoken query.
+        if (intent?.action == Intent.ACTION_VIEW) {
+            app.opentv.core.DeepLinks.searchQuery(intent.dataString)
+                ?.let { app.opentv.core.SearchRequests.request(it) }
+        }
         val recId = intent?.getLongExtra(EXTRA_WATCH_RECORDING, 0L) ?: 0L
         if (recId != 0L) {
             app.opentv.core.RecordingSignals.requestWatch(recId, System.currentTimeMillis())
@@ -187,7 +206,8 @@ object Routes {
     const val HOME = "home"
     const val ADD_SOURCE = "add-source"
     const val PLAYER = "player/{channelId}"
-    const val SEARCH = "search"
+    // The optional text is what a deep link (opentv://search?q=…) asked to search for.
+    const val SEARCH = "search?q={q}"
     const val EPG_SETTINGS = "epg-settings"
     const val APP_SETTINGS = "app-settings"
     const val SETTINGS_HUB = "settings"
@@ -215,6 +235,7 @@ object Routes {
     const val VOD_PLAYER = "vod?key={key}&url={url}&title={title}&ua={ua}"
 
     fun player(channelId: Long) = "player/$channelId"
+    fun search(query: String = "") = "search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
     fun seriesDetail(seriesId: Long) = "series/$seriesId"
     fun movieDetail(movieId: Long) = "movie/$movieId"
     fun editSource(sourceId: Long) = "edit-source/$sourceId"
@@ -269,6 +290,21 @@ private fun OpenTvApp(isTelevision: Boolean) {
         if (id != null && id != 0L) {
             app.opentv.core.PlayRequests.consume()
             navController.navigate(Routes.player(id))
+        }
+    }
+
+    // A search deep link: open Search with the text typed in. Replaces a Search screen that is
+    // already open (a second voice query) instead of stacking another on top. Skipped during
+    // first-run setup — there is nothing to search until a provider has been added.
+    val searchRequest by app.opentv.core.SearchRequests.query.collectAsState()
+    LaunchedEffect(searchRequest) {
+        val text = searchRequest ?: return@LaunchedEffect
+        app.opentv.core.SearchRequests.consume()
+        if (start != Routes.HOME) return@LaunchedEffect
+        runCatching {
+            navController.navigate(Routes.search(text)) {
+                popUpTo(Routes.SEARCH) { inclusive = true }
+            }
         }
     }
 
@@ -349,7 +385,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     },
                     onAddSource = { navController.navigate(Routes.ADD_SOURCE) },
                     onRefresh = sourcesViewModel::refreshAll,
-                    onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                    onOpenSearch = { navController.navigate(Routes.search()) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS_HUB) },
                     onOpenProfiles = { navController.navigate(Routes.PROFILES) },
                     onPlayRecording = { rec ->
@@ -393,8 +429,12 @@ private fun OpenTvApp(isTelevision: Boolean) {
                 )
             }
 
-            composable(Routes.SEARCH) {
+            composable(Routes.SEARCH) { entry ->
+                val initialQuery = entry.arguments?.getString("q")
+                    ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) }
+                    .orEmpty()
                 SearchScreen(
+                    initialQuery = initialQuery,
                     onPlayChannel = { channel -> navController.navigate(Routes.player(channel.id)) },
                     onPlayMovie = { movie ->
                         navController.navigate(
@@ -501,6 +541,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                             Routes.vodPlayer(key, url, title, "OpenTV/0.1 (Android)"),
                         )
                     },
+                    onStorageSettings = { navController.navigate(Routes.REC_SETTINGS) },
                     onOpenSeries = { series -> navController.navigate(Routes.seriesDetail(series.id)) },
                     onOpenPerson = { name -> navController.navigate(Routes.person(name)) },
                 )
@@ -526,7 +567,8 @@ private fun OpenTvApp(isTelevision: Boolean) {
                             Routes.vodPlayer(key = key, url = url, title = title, ua = "OpenTV/0.1 (Android)"),
                         )
                     },
-                    onDownload = { movie -> vodViewModel.downloadMovie(movie) },
+                    onDownload = { movie, copy -> vodViewModel.downloadMovie(movie, copy) },
+                    onStorageSettings = { navController.navigate(Routes.REC_SETTINGS) },
                     onOpenMovie = { movie -> navController.navigate(Routes.movieDetail(movie.id)) },
                     onOpenPerson = { name -> navController.navigate(Routes.person(name)) },
                 )

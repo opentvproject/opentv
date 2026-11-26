@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -1064,20 +1065,93 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
     fun downloadFlow(mediaKey: String): kotlinx.coroutines.flow.Flow<app.opentv.data.model.Download?> =
         graph.downloadRepository.observeByMediaKey(mediaKey)
 
-    /** Queue a movie for offline download to the user's recording storage. */
-    fun downloadMovie(movie: Movie) {
+    /** Every download by its media key, so a show's page can mark each episode's state. */
+    fun downloadsByKey(): kotlinx.coroutines.flow.Flow<Map<String, app.opentv.data.model.Download>> =
+        graph.downloadRepository.observeAll().map { list -> list.associateBy { it.mediaKey } }
+
+    /** One copy of a film the provider offers, as a row in the download picker. */
+    data class DownloadOption(val movie: Movie, val qualityLabel: String, val sizeBytes: Long?)
+
+    /**
+     * The copies of [movie] that can be downloaded — the provider's own quality tiers of the same
+     * film (4K / FHD / HD / SD listings), best first, each with its real file size where the provider
+     * reports one. A film listed once yields a single option. Nothing is re-encoded on the device.
+     */
+    fun downloadOptions(movie: Movie): kotlinx.coroutines.flow.Flow<List<DownloadOption>> = kotlinx.coroutines.flow.flow {
+        val ctx = getApplication<Application>()
+        // The copy on screen first, so the choice is there at once; sizes and siblings fill in after.
+        var options = listOf(DownloadOption(movie, "", null))
+        emit(options)
+        val ownSize = app.opentv.data.work.Downloads.probeSize(ctx, movie.streamUrl, movie.sourceId)
+        options = listOf(DownloadOption(movie, "", ownSize))
+        emit(options)
+
+        val fragment = app.opentv.data.work.DownloadSizes.nameFragment(movie.name) ?: return@flow
+        val siblings = runCatching {
+            withContext(Dispatchers.IO) { graph.database.movies().search(fragment, 400).first() }
+        }.getOrDefault(emptyList())
+        val variants = graph.catalogRepository.collapseVariants(siblings)
+            .firstOrNull { group -> group.variants.any { it.movie.id == movie.id } }
+            ?.variants
+            ?.distinctBy { it.qualityLabel }
+            ?.take(6)
+            ?.takeIf { it.size > 1 }
+            ?: return@flow
+        options = variants.map { v ->
+            DownloadOption(v.movie, v.qualityLabel, if (v.movie.id == movie.id) ownSize else null)
+        }
+        emit(options)
+        // One at a time: probing every copy at once would trip a single-connection provider.
+        for (v in variants) {
+            if (v.movie.id == movie.id) continue
+            val size = app.opentv.data.work.Downloads.probeSize(ctx, v.movie.streamUrl, v.movie.sourceId)
+            options = options.map { if (it.movie.id == v.movie.id) it.copy(sizeBytes = size) else it }
+            emit(options)
+        }
+    }
+
+    /** Rough size of [episodes] together, from measuring the first; null when the provider won't say. */
+    suspend fun seasonSizeEstimate(episodes: List<Episode>): Long? {
+        val first = episodes.firstOrNull() ?: return null
+        val sample = app.opentv.data.work.Downloads.probeSize(getApplication(), first.streamUrl, first.sourceId)
+        return app.opentv.data.work.DownloadSizes.seasonEstimate(sample, episodes.size)
+    }
+
+    /** Where downloads are saved right now (this device, NAS or USB), for the download dialogs. */
+    fun downloadDestination(): app.opentv.data.work.Downloads.Destination =
+        app.opentv.data.work.Downloads.destination(getApplication())
+
+    /** Free space on that storage; null when it can't be read. */
+    suspend fun downloadFreeSpace(): Long? = app.opentv.data.work.Downloads.freeSpace(getApplication())
+
+    /**
+     * Queue a movie for offline download to the user's recording storage. [copy] is the quality tier
+     * to fetch; the download stays filed under [movie], so its page tracks it whichever was chosen.
+     */
+    fun downloadMovie(movie: Movie, copy: Movie = movie) {
         viewModelScope.launch {
             app.opentv.data.work.Downloads.start(
                 getApplication(), "movie:${movie.id}", movie.displayTitle, movie.posterUrl,
-                movie.streamUrl, movie.sourceId, movie.containerExtension,
+                copy.streamUrl, copy.sourceId, copy.containerExtension,
                 year = movie.year, genre = movie.genre, plot = movie.plot,
             )
         }
     }
 
+    /** Queue every episode of a season, in order. Ones already downloaded or queued are left alone. */
+    fun downloadSeason(episodes: List<Episode>, series: Series?) {
+        viewModelScope.launch {
+            episodes.sortedBy { it.episodeNumber }.forEach { queueEpisode(it, series) }
+        }
+    }
+
     /** Queue a show episode for offline download, carrying its show's metadata for the Library. */
     fun downloadEpisode(ep: Episode, series: Series? = null) {
-        viewModelScope.launch {
+        viewModelScope.launch { queueEpisode(ep, series) }
+    }
+
+    private suspend fun queueEpisode(ep: Episode, series: Series?) {
+        run {
             app.opentv.data.work.Downloads.start(
                 getApplication(), "ep:${ep.id}",
                 "S${ep.season}E${ep.episodeNumber} · ${ep.title}",

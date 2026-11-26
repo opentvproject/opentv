@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **Portrait mode on phones.** Hold the phone upright and OpenTV now lays itself out for it: a
+  top bar with search, profile and settings, the categories as a strip you swipe sideways, a
+  channel list with what's on now, and the Live TV / Movies / Shows / Library tabs along the
+  bottom. Film and show pages, search, settings and the first-run screens all fit the narrow
+  screen. Anything that plays — a channel, a film, an episode — turns the phone to landscape
+  for the full screen and turns back when you leave. TVs and tablets are unchanged. (#49)
+- **Downloads: choose the copy, see the size, take a whole season.** Download on a film now asks
+  first, showing the file's real size and the space free on the device; when your provider lists
+  the film in more than one quality (4K, FHD, HD, SD) each copy is offered with its own size, so
+  you can take the small one for a phone. A show's page gains **Download season** beside each
+  season, with an estimate for the lot. Downloads now run one after another rather than all at
+  once, so a season doesn't trip a provider's one-connection limit, and removing a download
+  while it is still running stops it. Files are saved exactly as the provider sends them, so
+  audio and subtitle tracks inside the file keep working offline. (#50)
+- **Downloads go where your recordings go — this device, a USB drive or a NAS.** The download
+  box now says where the file will be saved and how much room that place has (a network share
+  and a USB drive report their own free space), and selecting it opens the storage setting to
+  change it. Each episode on a show's page shows whether it is downloaded or on its way, and
+  Download season only counts and fetches the ones you don't have yet.
+- **Open a search from outside the app.** `opentv://search?q=…` opens OpenTV's search with the
+  words already filled in, which lets a voice-search helper (or any launcher or automation app)
+  send "search for …" straight to it. (#48)
+
 ## 0.12.0
 
 - **Playback diagnostics: find out why it buffers, and get moved to a stream that doesn't.**
