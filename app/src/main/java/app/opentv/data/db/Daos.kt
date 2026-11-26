@@ -601,6 +601,14 @@ interface EpisodeDao {
     @Query("SELECT * FROM episodes WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Episode?
 
+    /**
+     * Every episode, for the sync receiver's `hash -> url` index. See [app.opentv.sync.SyncKeys]:
+     * a peer's bundle carries SHA-256 keys, never URLs, so resolving one means having this
+     * device's own URLs in hand.
+     */
+    @Query("SELECT * FROM episodes")
+    suspend fun all(): List<Episode>
+
     @Upsert
     suspend fun upsertAll(episodes: List<Episode>)
 

@@ -665,6 +665,8 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
         val feeds: List<EpgFeed> = emptyList(),
         val syncing: Boolean = false,
         val statusLine: String? = null,
+        /** Built-in feed the app thinks fits this region, offered but never auto-enabled. */
+        val suggestion: String? = null,
     )
 
     private val _ui = MutableStateFlow(UiState())
@@ -677,6 +679,30 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.value = _ui.value.copy(feeds = feeds)
             }
         }
+        viewModelScope.launch {
+            graph.settings.epgSuggestion.collect { name ->
+                _ui.value = _ui.value.copy(suggestion = name)
+            }
+        }
+    }
+
+    /**
+     * Accepts the offered guide. This is the only place a built-in feed gets enabled from the
+     * suggestion, and it is a tap the user made — the download that follows is their choice.
+     */
+    fun acceptSuggestion() {
+        val name = _ui.value.suggestion ?: return
+        viewModelScope.launch {
+            graph.settings.setEpgSuggestion(null)
+            _ui.value.feeds.firstOrNull { it.name == name }?.let { feed ->
+                graph.epgRepository.setFeedEnabled(feed.id, true)
+                refresh()
+            }
+        }
+    }
+
+    fun dismissSuggestion() {
+        viewModelScope.launch { graph.settings.setEpgSuggestion(null) }
     }
 
     fun setEnabled(feed: EpgFeed, enabled: Boolean) {

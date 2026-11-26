@@ -482,6 +482,29 @@ class AppSettings private constructor(context: Context) {
             prefs.getString(KEY_STREMIO_ADDONS, null)?.let { addonJson.decodeFromString<List<StremioAddon>>(it) }
         }.getOrNull() ?: emptyList()
 
+    // ---- Guide suggestion --------------------------------------------------------------------
+
+    /**
+     * Name of a built-in guide feed the app thinks would help this device, or null.
+     *
+     * The region is inferred from channel names, which is usually right — but acting on it means
+     * downloading from a third-party EPG host the user never asked for. Guessing correctly is not
+     * consent, so detection only sets this value; Settings → TV guide offers it with Accept /
+     * Not now, and accepting is the only thing that ever enables the feed.
+     */
+    private val _epgSuggestion = MutableStateFlow(
+        prefs.getString(KEY_EPG_SUGGESTION, null)?.takeIf { it.isNotBlank() },
+    )
+    val epgSuggestion: StateFlow<String?> = _epgSuggestion.asStateFlow()
+
+    fun setEpgSuggestion(name: String?) {
+        val value = name?.takeIf { it.isNotBlank() }
+        prefs.edit().apply {
+            if (value == null) remove(KEY_EPG_SUGGESTION) else putString(KEY_EPG_SUGGESTION, value)
+        }.apply()
+        _epgSuggestion.value = value
+    }
+
     companion object {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
@@ -525,6 +548,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_VOD_SYNCED_AT = "vod_synced_at"
         private const val KEY_TMDB_KEY = "tmdb_api_key"
         private const val KEY_STREMIO_ADDONS = "stremio_addons"
+        private const val KEY_EPG_SUGGESTION = "epg_suggestion"
         private const val KEY_PAD_START = "rec_pad_start_min"
         private const val KEY_PAD_END = "rec_pad_end_min"
         private const val KEY_REC_AUTOSWITCH = "rec_auto_switch"

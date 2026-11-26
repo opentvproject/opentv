@@ -6,6 +6,7 @@
 package app.opentv.data.repo
 
 import android.util.Log
+import app.opentv.core.AppSettings
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.db.EpgChannelAliasDao
 import app.opentv.data.db.EpgFeedDao
@@ -63,6 +64,7 @@ class EpgRepository(
     private val sourceDao: SourceDao,
     private val api: XtreamApi,
     private val http: OkHttpClient,
+    private val settings: AppSettings,
 ) {
 
     data class SyncSummary(
@@ -340,6 +342,18 @@ class EpgRepository(
      * and no custom feed exists. Switch it off and it stays off — a choice the user has
      * made is never overridden.
      */
+    /**
+     * Notices that a region's channels are clearly present and offers the matching free guide —
+     * it does **not** switch it on.
+     *
+     * Enabling a feed downloads from a third-party host (`epgshare01.online`,
+     * `raw.githubusercontent.com`), which is a network call the user never made. Guessing right
+     * does not make it consent, so this records a suggestion in [AppSettings] and the TV guide
+     * screen shows it with Accept / Not now. Accepting is the only path from here to a download.
+     *
+     * Guard rails unchanged: only when every built-in is untouched (never enabled, never synced)
+     * and no custom feed exists. A choice the user made is never overridden.
+     */
     private suspend fun maybeAutoEnableRegionalFeed() {
         val all = feedDao.all()
         val builtIns = all.filter { it.builtIn }
@@ -357,9 +371,9 @@ class EpgRepository(
         if (top.value < MIN_CHANNELS_FOR_AUTO_REGION) return
 
         val feedName = REGION_TO_FEED[top.key] ?: return
-        val feed = builtIns.firstOrNull { it.name == feedName } ?: return
-        feedDao.setEnabled(feed.id, true)
-        Log.i(TAG, "Auto-enabled '${feed.name}' — ${top.value} channels tagged ${top.key}")
+        if (builtIns.none { it.name == feedName }) return
+        settings.setEpgSuggestion(feedName)
+        Log.i(TAG, "Suggested '${feedName}' — ${top.value} channels tagged ${top.key}")
     }
 
     companion object {

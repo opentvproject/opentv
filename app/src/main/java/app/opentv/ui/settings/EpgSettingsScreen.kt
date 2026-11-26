@@ -92,6 +92,33 @@ fun EpgSettingsScreen(
         )
         Spacer(Modifier.height(16.dp))
 
+        ui.suggestion?.let { feedName ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.epg_suggestion_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.epg_suggestion_body, feedName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { viewModel.acceptSuggestion() }) {
+                            Text(stringResource(R.string.epg_suggestion_accept))
+                        }
+                        TextButton(onClick = { viewModel.dismissSuggestion() }) {
+                            Text(stringResource(R.string.epg_suggestion_dismiss))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(ui.feeds, key = { it.id }) { feed ->
                 FeedRow(
