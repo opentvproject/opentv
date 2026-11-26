@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 - **Portrait mode on phones.** Hold the phone upright and OpenTV now lays itself out for it: a
   top bar with search, profile and settings, the categories as a strip you swipe sideways, a
