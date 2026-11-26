@@ -500,6 +500,9 @@ interface MovieDao {
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun byId(id: Long): Movie?
 
+    @Query("SELECT * FROM movies WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<Movie>
+
     /** Stream URL is the cross-device key: the same film has the same URL on the same provider. */
     @Query("SELECT * FROM movies WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Movie?
@@ -572,11 +575,17 @@ interface SeriesDao {
     )
     suspend fun seriesWithActor(name: String, limit: Int): List<Series>
 
+    @Query("SELECT * FROM series WHERE favourite = 1 ORDER BY name")
+    fun observeFavourites(): Flow<List<Series>>
+
     @Query("SELECT * FROM series WHERE id = :id")
     suspend fun byId(id: Long): Series?
 
     @Query("SELECT * FROM series WHERE sourceId = :sourceId AND seriesId = :seriesId LIMIT 1")
     suspend fun byProviderId(sourceId: Long, seriesId: String): Series?
+
+    @Query("SELECT * FROM series WHERE seriesId IN (:seriesIds)")
+    suspend fun byProviderIds(seriesIds: List<String>): List<Series>
 
     @Query("UPDATE series SET favourite = :favourite WHERE id = :id")
     suspend fun setFavourite(id: Long, favourite: Boolean)
@@ -602,6 +611,9 @@ interface EpisodeDao {
 
     @Query("SELECT * FROM episodes WHERE id = :id")
     suspend fun byId(id: Long): Episode?
+
+    @Query("SELECT * FROM episodes WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<Episode>
 
     @Query(
         """
@@ -635,9 +647,12 @@ interface PlaybackPositionDao {
     )
     fun observeRecent(profileId: Long, limit: Int = 30): Flow<List<PlaybackPosition>>
 
-    /** Complete profile history, newest activity first — used by My View. */
-    @Query("SELECT * FROM playback_positions WHERE profileId = :profileId ORDER BY updatedAtMillis DESC")
-    fun observeForProfile(profileId: Long): Flow<List<PlaybackPosition>>
+    /** Recent profile history, newest activity first — bounded for My View. */
+    @Query(
+        "SELECT * FROM playback_positions WHERE profileId = :profileId " +
+            "ORDER BY updatedAtMillis DESC LIMIT :limit",
+    )
+    fun observeForProfile(profileId: Long, limit: Int = 200): Flow<List<PlaybackPosition>>
 
     @Query("SELECT * FROM playback_positions")
     suspend fun all(): List<PlaybackPosition>

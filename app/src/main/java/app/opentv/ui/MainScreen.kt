@@ -56,6 +56,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,8 +88,8 @@ import app.opentv.ui.vod.SeriesScreen
  * rather than pushing it, so expanding the menu never reflows the guide underneath.
  */
 enum class Tab(val labelRes: Int, val icon: ImageVector) {
-    MY_VIEW(R.string.nav_my_view, Icons.Filled.History),
     LIVE(R.string.nav_live_tv, Icons.Filled.LiveTv),
+    MY_VIEW(R.string.nav_my_view, Icons.Filled.History),
     MOVIES(R.string.nav_movies, Icons.Filled.Movie),
     SHOWS(R.string.nav_shows, Icons.Filled.Tv),
     LIBRARY(R.string.nav_library, Icons.Filled.VideoLibrary),
@@ -99,6 +100,7 @@ private val RAIL_EXPANDED = 236.dp
 
 @Composable
 fun MainScreen(
+    isCurrentDestination: Boolean,
     isTelevision: Boolean,
     hasSources: Boolean,
     isSyncing: Boolean,
@@ -126,33 +128,32 @@ fun MainScreen(
     val seriesEnabled by settings.seriesEnabled.collectAsState()
     val visibleTabs = remember(liveEnabled, moviesEnabled, seriesEnabled) {
         buildList {
-            add(Tab.MY_VIEW)
             if (liveEnabled) add(Tab.LIVE)
+            if (moviesEnabled || seriesEnabled) add(Tab.MY_VIEW)
             if (moviesEnabled) add(Tab.MOVIES)
             if (seriesEnabled) add(Tab.SHOWS)
             add(Tab.LIBRARY)
         }
     }
-    // The default/home tab is the first visible one — Live TV normally, otherwise the first type
-    // still switched on (or Recordings if none are).
+    // The default/home tab is the first visible one — Live TV.
     val homeTab = visibleTabs.first()
 
-    var tab by remember { mutableStateOf(homeTab) }
+    var tab by rememberSaveable(key = "main_tab") { mutableStateOf(homeTab) }
 
     // If the selected tab gets hidden (its type toggled off while it's open), drop back to the
     // home tab so the content area never tries to show a tab that's no longer there.
     LaunchedEffect(visibleTabs) {
-        if (tab !in visibleTabs) tab = homeTab
+        if (tab !in visibleTabs) tab = visibleTabs.first()
     }
 
     // Back from a non-home tab returns to the home tab rather than dropping out of the app.
-    BackHandler(enabled = tab != homeTab) { tab = homeTab }
+    BackHandler(enabled = isCurrentDestination && tab != homeTab) { tab = homeTab }
 
     // On the home tab, Back would otherwise drop straight out to the TV launcher — one stray press
     // and you've closed the app. Ask first. (A dialog or panel open in a child screen swallows Back
     // before this, so this only fires at the true root.)
     var showExit by remember { mutableStateOf(false) }
-    BackHandler(enabled = tab == homeTab) { showExit = true }
+    BackHandler(enabled = isCurrentDestination && tab == homeTab) { showExit = true }
     if (showExit) {
         AlertDialog(
             onDismissRequest = { showExit = false },

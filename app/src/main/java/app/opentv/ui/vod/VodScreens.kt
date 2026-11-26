@@ -49,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,12 +57,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.data.model.Category
 import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
@@ -85,7 +88,7 @@ fun MoviesScreen(
     viewModel: VodViewModel = viewModel(),
 ) {
     val categories by viewModel.movieCategories.collectAsState()
-    val resume by viewModel.continueWatching.collectAsState()
+    val resume by viewModel.continueWatchingMovies.collectAsState()
     val recommended by viewModel.recommendedMovies.collectAsState()
     val recentlyAdded by viewModel.recentlyAddedMovies.collectAsState()
     val genreRows by viewModel.movieGenreRows.collectAsState()
@@ -102,7 +105,7 @@ fun MoviesScreen(
     }
 
     // null = the curated home rows; a category id = that category's full grid.
-    var browseCategory by remember { mutableStateOf<String?>(null) }
+    var browseCategory by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(categories, browseCategory) {
         if (browseCategory != null && categories.isNotEmpty() && categories.none { "${it.sourceId}:${it.id}" == browseCategory }) {
@@ -179,7 +182,7 @@ fun SeriesScreen(
     viewModel: VodViewModel = viewModel(),
 ) {
     val categories by viewModel.seriesCategories.collectAsState()
-    val resume by viewModel.continueWatching.collectAsState()
+    val resume by viewModel.continueWatchingEpisodes.collectAsState()
     val recentlyAdded by viewModel.recentlyAddedSeries.collectAsState()
     val genreRows by viewModel.seriesGenreRows.collectAsState()
     val categorySeries by viewModel.series.collectAsState()
@@ -192,7 +195,7 @@ fun SeriesScreen(
         viewModel.loadHomeFeeds()
     }
 
-    var browseCategory by remember { mutableStateOf<String?>(null) }
+    var browseCategory by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(categories, browseCategory) {
         if (browseCategory != null && categories.isNotEmpty() && categories.none { "${it.sourceId}:${it.id}" == browseCategory }) {
@@ -251,7 +254,7 @@ fun SeriesScreen(
     }
 }
 
-/** Profile-specific watch history, split into unfinished and completed movies and shows. */
+/** Profile-specific watch history and favourites, split across movies and shows. */
 @Composable
 fun MyViewScreen(
     onOpenMovie: (Movie) -> Unit,
@@ -259,14 +262,26 @@ fun MyViewScreen(
     onResume: (mediaKey: String, url: String, title: String) -> Unit,
     viewModel: VodViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
+    val settings = remember { AppSettings.get(context) }
+    val moviesEnabled by settings.moviesEnabled.collectAsState()
+    val seriesEnabled by settings.seriesEnabled.collectAsState()
     val history by viewModel.watchHistory.collectAsState()
-    val continueMovies = history.filter { !it.isWatched && it.movie != null }
-    val continueShows = history.filter { !it.isWatched && it.series != null }
-    val watchedMovies = history.filter { it.isWatched && it.movie != null }
-    val watchedShows = history.filter { it.isWatched && it.series != null }
+    val rawFavMovies by viewModel.favouriteMovies.collectAsState()
+    val rawFavSeries by viewModel.favouriteSeries.collectAsState()
+
+    val continueMovies = if (moviesEnabled) history.filter { !it.isWatched && it.movie != null } else emptyList()
+    val continueShows = if (seriesEnabled) history.filter { !it.isWatched && it.series != null } else emptyList()
+    val watchedMovies = if (moviesEnabled) history.filter { it.isWatched && it.movie != null } else emptyList()
+    val watchedShows = if (seriesEnabled) history.filter { it.isWatched && it.series != null } else emptyList()
+    val favMovies = if (moviesEnabled) rawFavMovies else emptyList()
+    val favSeries = if (seriesEnabled) rawFavSeries else emptyList()
+    val hasHistory = continueMovies.isNotEmpty() || continueShows.isNotEmpty() ||
+        watchedMovies.isNotEmpty() || watchedShows.isNotEmpty()
+    val hasFavourites = favMovies.isNotEmpty() || favSeries.isNotEmpty()
     var confirmClearAll by remember { mutableStateOf(false) }
 
-    if (history.isEmpty()) {
+    if (!hasHistory && !hasFavourites) {
         EmptyVod(
             title = stringResource(R.string.nav_my_view),
             body = stringResource(R.string.my_view_empty),
@@ -305,11 +320,13 @@ fun MyViewScreen(
             ) {
                 Text(stringResource(R.string.nav_my_view), style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { confirmClearAll = true }) {
-                    Icon(
-                        Icons.Filled.DeleteSweep,
-                        contentDescription = stringResource(R.string.my_view_clear_all_confirm),
-                    )
+                if (hasHistory) {
+                    IconButton(onClick = { confirmClearAll = true }) {
+                        Icon(
+                            Icons.Filled.DeleteSweep,
+                            contentDescription = stringResource(R.string.my_view_clear_all_confirm),
+                        )
+                    }
                 }
             }
         }
@@ -327,6 +344,19 @@ fun MyViewScreen(
                     HistoryPosterRow(stringResource(R.string.my_view_shows), continueShows, false, viewModel::clearHistoryItem) { item ->
                         onResume(item.mediaKey, item.streamUrl, item.resumeTitle)
                     }
+                }
+            }
+        }
+        if (hasFavourites) {
+            item(key = "favourites-header") { SectionHeader(stringResource(R.string.my_view_favourites)) }
+            if (favMovies.isNotEmpty()) {
+                item(key = "favourites-movies") {
+                    MoviePosterRow(stringResource(R.string.my_view_movies), favMovies, onOpenMovie)
+                }
+            }
+            if (favSeries.isNotEmpty()) {
+                item(key = "favourites-shows") {
+                    SeriesPosterRow(stringResource(R.string.my_view_shows), favSeries, onOpenSeries)
                 }
             }
         }

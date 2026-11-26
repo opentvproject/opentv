@@ -62,6 +62,7 @@
 
     <!-- ============================ My View / playback history ============================ -->
     <string name="my_view_continue_watching">Continue Watching</string>
+    <string name="my_view_favourites">Favourites</string>
     <string name="my_view_watched">Watched</string>
     <string name="my_view_movies">Movies</string>
     <string name="my_view_shows">Shows</string>
@@ -175,9 +176,13 @@
     <string name="player_none_available">None available</string>
     <string name="player_subtitles_off">Off</string>
     <string name="player_add_external_subtitle">Load external subtitle</string>
+    <string name="player_subtitle_browse_file">Choose subtitle file</string>
     <string name="player_external_subtitle_unsupported">Choose an SRT, VTT, SSA, ASS, or TTML subtitle file.</string>
-    <string name="player_external_subtitle_picker_unavailable">No file picker is installed on this device.</string>
-    <string name="player_next_episode">Next episode</string>
+    <string name="player_subtitle_file_picker_unavailable">No file manager is available. Paste a subtitle URL instead.</string>
+    <string name="player_external_subtitle_formats">Supported formats: SRT, VTT, SSA, ASS, TTML</string>
+    <string name="player_external_subtitle_url_label">Subtitle URL (http:// or https://)</string>
+    <string name="player_external_subtitle_url_invalid">Enter a valid http:// or https:// URL.</string>
+    <string name="player_external_subtitle_load_url">Load URL</string>
     <string name="player_next_episode_in">Playing automatically in %1$s</string>
     <string name="player_play_next">Play next</string>
     <string name="player_dismiss_next">Dismiss</string>

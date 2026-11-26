@@ -10,7 +10,6 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -101,6 +100,7 @@ class PlayerController(
         data object Idle : State
         data class Buffering(val title: String) : State
         data class Playing(val title: String) : State
+        data object Ended : State
         /** Playback stopped and retries are exhausted. [message] is written for humans. */
         data class Error(val title: String, val message: String, val canRetry: Boolean) : State
     }
@@ -244,7 +244,7 @@ class PlayerController(
                             State.Playing(title)
                         }
                         Player.STATE_IDLE -> _state.value
-                        Player.STATE_ENDED -> State.Idle
+                        Player.STATE_ENDED -> State.Ended
                         else -> _state.value
                     }
                 }

@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
@@ -243,6 +244,7 @@ object Routes {
 @Composable
 private fun OpenTvApp(isTelevision: Boolean) {
     val navController = rememberNavController()
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val sourcesViewModel: SourcesViewModel = viewModel()
     val vodViewModel: VodViewModel = viewModel()
     val profilesViewModel: ProfilesViewModel = viewModel()
@@ -340,17 +342,24 @@ private fun OpenTvApp(isTelevision: Boolean) {
                 )
             }
 
-            composable(Routes.HOME) {
+            composable(
+                Routes.HOME,
+            ) {
                 MainScreen(
+                    isCurrentDestination = currentBackStackEntry?.destination?.route == Routes.HOME,
                     isTelevision = isTelevision,
                     hasSources = sourcesUi.sources.isNotEmpty(),
                     isSyncing = sourcesUi.syncing,
                     onPlayChannel = { channel -> navController.navigate(Routes.player(channel.id)) },
                     onOpenMovie = { movie ->
-                        navController.navigate(Routes.movieDetail(movie.id))
+                        navController.navigate(Routes.movieDetail(movie.id)) {
+                            launchSingleTop = true
+                        }
                     },
                     onOpenSeries = { series ->
-                        navController.navigate(Routes.seriesDetail(series.id))
+                        navController.navigate(Routes.seriesDetail(series.id)) {
+                            launchSingleTop = true
+                        }
                     },
                     onResume = { key, url, title ->
                         navController.navigate(
@@ -526,6 +535,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     },
                     onOpenSeries = { series -> navController.navigate(Routes.seriesDetail(series.id)) },
                     onOpenPerson = { name -> navController.navigate(Routes.person(name)) },
+                    onBack = { navController.popBackStack() },
                 )
             }
 
@@ -552,6 +562,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     onDownload = { movie -> vodViewModel.downloadMovie(movie) },
                     onOpenMovie = { movie -> navController.navigate(Routes.movieDetail(movie.id)) },
                     onOpenPerson = { name -> navController.navigate(Routes.person(name)) },
+                    onBack = { navController.popBackStack() },
                 )
             }
 

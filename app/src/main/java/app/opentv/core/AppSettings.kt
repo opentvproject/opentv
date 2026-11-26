@@ -301,11 +301,29 @@ class AppSettings private constructor(context: Context) {
         }
     }
 
+    fun showCategories(kind: StreamKind, keys: Set<String>) {
+        if (keys.isEmpty()) return
+        when (kind) {
+            StreamKind.LIVE -> setUserHiddenLiveCategories(_userHiddenLiveCategories.value - keys)
+            StreamKind.MOVIE -> setUserHiddenMovieCategories(_userHiddenMovieCategories.value - keys)
+            StreamKind.SERIES -> setUserHiddenSeriesCategories(_userHiddenSeriesCategories.value - keys)
+        }
+    }
+
     fun hideAllCategories(kind: StreamKind, allKeys: Set<String>) {
         when (kind) {
             StreamKind.LIVE -> setUserHiddenLiveCategories(allKeys)
             StreamKind.MOVIE -> setUserHiddenMovieCategories(allKeys)
             StreamKind.SERIES -> setUserHiddenSeriesCategories(allKeys)
+        }
+    }
+
+    fun hideCategories(kind: StreamKind, keys: Set<String>) {
+        if (keys.isEmpty()) return
+        when (kind) {
+            StreamKind.LIVE -> setUserHiddenLiveCategories(_userHiddenLiveCategories.value + keys)
+            StreamKind.MOVIE -> setUserHiddenMovieCategories(_userHiddenMovieCategories.value + keys)
+            StreamKind.SERIES -> setUserHiddenSeriesCategories(_userHiddenSeriesCategories.value + keys)
         }
     }
 

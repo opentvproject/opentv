@@ -756,24 +756,65 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
             .mapLatest { positions -> positions.filter { !it.isFinished }.mapNotNull { resolveResume(it) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Continue Watching filtered to movies only — for the Movies tab. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val continueWatchingMovies: StateFlow<List<ResumeItem>> =
+        settings.activeProfileId
+            .flatMapLatest { pid -> graph.playbackPositions.observeRecent(pid) }
+            .mapLatest { positions ->
+                positions.filter { !it.isFinished && it.mediaKey.startsWith("movie:") }
+                    .mapNotNull { resolveResume(it) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Continue Watching filtered to episodes only — for the Shows tab. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val continueWatchingEpisodes: StateFlow<List<ResumeItem>> =
+        settings.activeProfileId
+            .flatMapLatest { pid -> graph.playbackPositions.observeRecent(pid) }
+            .mapLatest { positions ->
+                positions.filter { !it.isFinished && it.mediaKey.startsWith("ep:") }
+                    .mapNotNull { resolveResume(it) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val favouriteMovies: StateFlow<List<Movie>> =
+        graph.catalogRepository.observeFavouriteMovies()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val favouriteSeries: StateFlow<List<Series>> =
+        graph.catalogRepository.observeFavouriteSeries()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val watchHistory: StateFlow<List<HistoryItem>> =
         settings.activeProfileId
             .flatMapLatest { profileId -> graph.playbackPositions.observeForProfile(profileId) }
             .mapLatest { positions ->
+                val parsed = positions.mapNotNull { position ->
+                    val parts = position.mediaKey.split(":", limit = 2)
+                    if (parts.size != 2) return@mapNotNull null
+                    val id = parts[1].toLongOrNull() ?: return@mapNotNull null
+                    Triple(position, parts[0], id)
+                }
+                val movieIds = parsed.filter { it.second == "movie" }.map { it.third }
+                val episodeIds = parsed.filter { it.second == "ep" }.map { it.third }
+                val moviesById = graph.catalogRepository.moviesByIds(movieIds)
+                val episodesById = graph.catalogRepository.episodesByIds(episodeIds)
+                val seriesByProviderId = graph.catalogRepository.seriesForProviderIds(
+                    episodesById.values.map { it.seriesId },
+                )
+
                 val seenShows = mutableSetOf<Pair<Long, Boolean>>()
                 buildList {
-                    for (position in positions) {
-                        val parts = position.mediaKey.split(":", limit = 2)
-                        if (parts.size != 2) continue
-                        val id = parts[1].toLongOrNull() ?: continue
+                    for ((position, kind, id) in parsed) {
                         val progress = if (position.durationMillis > 0) {
                             (position.positionMillis.toFloat() / position.durationMillis).coerceIn(0f, 1f)
                         } else {
                             0f
                         }
-                        when (parts[0]) {
-                            "movie" -> graph.catalogRepository.movie(id)?.let { movie ->
+                        when (kind) {
+                            "movie" -> moviesById[id]?.let { movie ->
                                 add(
                                     HistoryItem(
                                         mediaKey = position.mediaKey,
@@ -789,8 +830,8 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                             }
                             "ep" -> {
-                                val episode = graph.catalogRepository.episode(id) ?: continue
-                                val show = graph.catalogRepository.seriesForEpisode(episode.sourceId, episode.seriesId)
+                                val episode = episodesById[id] ?: continue
+                                val show = seriesByProviderId[episode.sourceId to episode.seriesId]
                                     ?: continue
                                 if (seenShows.add(show.id to position.isFinished)) {
                                     val episodeLabel = "S${episode.season} E${episode.episodeNumber}"
@@ -1581,11 +1622,20 @@ class CategoriesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showAll() {
-        settings.showAllCategories(selectedKind.value)
+        if (selectedSource.value == null) {
+            settings.showAllCategories(selectedKind.value)
+        } else {
+            val visibleKeys = categories.value.map { it.key }.toSet()
+            settings.showCategories(selectedKind.value, visibleKeys)
+        }
     }
 
     fun hideAll() {
-        val allKeys = categories.value.map { it.key }.toSet()
-        settings.hideAllCategories(selectedKind.value, allKeys)
+        val visibleKeys = categories.value.map { it.key }.toSet()
+        if (selectedSource.value == null) {
+            settings.hideAllCategories(selectedKind.value, visibleKeys)
+        } else {
+            settings.hideCategories(selectedKind.value, visibleKeys)
+        }
     }
 }
